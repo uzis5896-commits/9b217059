@@ -295,4 +295,6 @@ def get_recommendations():
     return jsonify(recs[:5])
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # 智慧判斷：如果在雲端，讀取 Render 指派的 PORT，否則預設使用 5000
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False) # 雲端正式環境記得將 debug 設為 False

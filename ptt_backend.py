@@ -240,7 +240,8 @@ def smart_subscribe():
         # === 雙重保險：同時檢查 keyword 和 keywords 兩種拼法 ===
         keyword = data.get('keyword') or data.get('keywords') or data.get('search_text') or ''
         keyword = keyword.strip()
-
+        # 【補上這一行】把 user_id 也從包裹裡拿出來，如果沒傳就預設為 'anonymous'
+        user_id = data.get('user_id', 'anonymous')
         # 檢查是否真的沒抓到
         if not keyword:
             print("❌ 警告：後端真的抓不到關鍵字，請求被退回！", flush=True)

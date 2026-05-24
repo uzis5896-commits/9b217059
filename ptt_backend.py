@@ -117,9 +117,23 @@ def scrape_article_content(session, url):
     except: return ""
 
 def search_board_keyword(session, board, keyword):
-    articles = []
+    # PTT 搜尋的網址
+    search_url = f"https://www.ptt.cc/bbs/{board}/search?q={keyword}"
+    
+    # 【關鍵防護罩】一定要帶上模擬瀏覽器的 Header 和滿 18 歲的 Cookie
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
+    cookies = {'over18': '1'}
+    
     try:
-        url = f"https://www.ptt.cc/bbs/{board}/search?q={quote(keyword)}"
+        # 使用 session 發送請求
+        response = session.get(search_url, headers=headers, cookies=cookies, timeout=10)
+        
+        # 【加入這行照妖鏡】把 PTT 給伺服器的真實回應印在 Logs 裡！
+        print(f"🔍 正在搜尋 {board} 板 | 關鍵字: {keyword} | 狀態碼: {response.status_code}", flush=True)
+        
+        if response.status_code != 200:
+            print(f"⚠️ PTT 阻擋了請求！", flush=True)
+            return []
         soup = BeautifulSoup(session.get(url, headers=HEADERS, timeout=5, verify=False).text, 'html.parser')
         for r_ent in soup.find_all('div', class_='r-ent'):
             t_tag = r_ent.select_one('.title a'); p_tag = r_ent.select_one('.nrec span')

@@ -117,32 +117,35 @@ def scrape_article_content(session, url):
     except: return ""
 
 def search_board_keyword(session, board, keyword):
-    # PTT 搜尋的網址
     search_url = f"https://www.ptt.cc/bbs/{board}/search?q={keyword}"
-    
-    # 【關鍵防護罩】一定要帶上模擬瀏覽器的 Header 和滿 18 歲的 Cookie
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
     cookies = {'over18': '1'}
     
+    # 🐛 修正：必須先建立空陣列，否則如果爬不到東西，底下 return articles 會報錯
+    articles = [] 
+    
     try:
-        # 使用 session 發送請求
         response = session.get(search_url, headers=headers, cookies=cookies, timeout=10)
-        
-        # 【加入這行照妖鏡】把 PTT 給伺服器的真實回應印在 Logs 裡！
         print(f"🔍 正在搜尋 {board} 板 | 關鍵字: {keyword} | 狀態碼: {response.status_code}", flush=True)
         
         if response.status_code != 200:
             print(f"⚠️ PTT 阻擋了請求！", flush=True)
             return []
-        soup = BeautifulSoup(session.get(url, headers=HEADERS, timeout=5, verify=False).text, 'html.parser')
+            
+        # 🐛 修正：直接使用 response.text 解析，避免重複發送請求
+        soup = BeautifulSoup(response.text, 'html.parser')
         for r_ent in soup.find_all('div', class_='r-ent'):
-            t_tag = r_ent.select_one('.title a'); p_tag = r_ent.select_one('.nrec span')
+            t_tag = r_ent.select_one('.title a')
+            p_tag = r_ent.select_one('.nrec span')
             if t_tag and t_tag.get('href'):
-                s_str = p_tag.text.strip() if p_tag else '0'; sc = 0
+                s_str = p_tag.text.strip() if p_tag else '0'
+                sc = 0
                 if s_str == '爆': sc = 100
                 elif s_str.isdigit(): sc = int(s_str)
                 articles.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'normal'))
-    except: pass
+    except Exception as e: 
+        print(f"爬取 {board} 版搜尋時發生錯誤: {e}", flush=True)
+        
     return articles
 # --- 首頁：回傳前端網頁 ---
 @app.route('/')
@@ -227,22 +230,18 @@ def get_hot_topics():
 @app.route('/api/smart_subscribe', methods=['POST'])
 def smart_subscribe():
     try:
-        # === 監視器：印出前端到底傳了什麼 ===
         print(f"👉 收到前端請求內容: {request.get_data(as_text=True)}", flush=True)
         print(f"👉 請求格式 (Content-Type): {request.content_type}", flush=True)
 
-        # === 容錯接收法：不管前端傳 JSON 還是 Form，通通接起來 ===
         if request.is_json:
             data = request.get_json(silent=True) or {}
         else:
             data = request.form
 
-        # === 雙重保險：同時檢查 keyword 和 keywords 兩種拼法 ===
         keyword = data.get('keyword') or data.get('keywords') or data.get('search_text') or ''
         keyword = keyword.strip()
-        # 【補上這一行】把 user_id 也從包裹裡拿出來，如果沒傳就預設為 'anonymous'
         user_id = data.get('user_id', 'anonymous')
-        # 檢查是否真的沒抓到
+
         if not keyword:
             print("❌ 警告：後端真的抓不到關鍵字，請求被退回！", flush=True)
             return jsonify({'error': '請輸入關鍵字'}), 400
@@ -251,41 +250,56 @@ def smart_subscribe():
             db.session.add(SearchHistory(user_id=user_id, keyword=keyword))
             db.session.commit()
 
-        session = get_robust_session(); all_results = []
-        for board in TARGET_BOARDS: all_results.extend(search_board_keyword(session, board, keyword))
-        # 1. 確認搜尋結果是否為空 (這裡是 all_results)
+        session = get_robust_session()
+        all_results = []
+        for board in TARGET_BOARDS: 
+            all_results.extend(search_board_keyword(session, board, keyword))
+            
         if not all_results: 
             return jsonify({'message': '找不到相關討論'})
 
-        # 2. 排序並取前 10 名
         all_results.sort(key=lambda x: x.score, reverse=True)
         top_15 = all_results[:10]
         
-        # 3. 組裝文字 (這裡是 articles_text)
         articles_text = ""
         for i, a in enumerate(top_15):
             summary = scrape_article_content(session, a.url)[:100].replace('\n', ' ')
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
 
-        # 4. 呼叫 AI (這裡也要用 articles_text)
-        prompt = f"請根據以下 PTT 文章內容，給出一個 0~100 的綜合情感分數，並用一句話總結鄉民風向。\n\n文章內容：\n{articles_text}"
+        # ✨ [升級 2: 情感分析] 完美接回您原本的 JSON 解析邏輯
+        prompt = f"使用者搜尋：「{keyword}」。請根據文章摘要，用一句繁體說明重點，並判斷該文章對此關鍵字的「情感分數」(0=極負面/生氣/抱怨，100=極正面/開心/推薦，50=中立/客觀情報)。回傳純 JSON 陣列格式: [{{\n  \"id\": ID,\n  \"reason\": \"重點\",\n  \"sentiment\": 數字\n}}]\n文章列表:\n{articles_text}"
         
-        model = genai.GenerativeModel('gemini-pro')
-        response = model.generate_content(prompt)
-        
-        return jsonify({"result": response.text})       
-        # 呼叫 Gemini 模型
+        # 統一呼叫一次 Gemini 模型
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         
-        # 【最關鍵的這一行】把 AI 的回答回傳給前端！
-        return jsonify({"result": response.text})
+        # 處理 AI 回傳的 JSON 文字
+        try: 
+            json_str = response.text.replace('```json', '').replace('```', '').strip()
+            matches = json.loads(json_str)
+        except Exception as e: 
+            print(f"⚠️ JSON 解析失敗: {e}", flush=True)
+            matches = []
+
+        match_dict = {m.get('id'): {'reason': m.get('reason', '相關討論'), 'sentiment': m.get('sentiment', 50)} for m in matches}
         
-        # ⬆️⬆️⬆️ 補上這幾行 ⬆️⬆️⬆️
+        final_results = []
+        for i, a in enumerate(top_15):
+            final_results.append({
+                'board': a.board, 
+                'title': a.title, 
+                'url': a.url, 
+                'score': a.score, 
+                'reason': match_dict.get(i, {}).get('reason', '相關討論'),
+                'sentiment': match_dict.get(i, {}).get('sentiment', 50)
+            })
+
+        # 【唯一正確的出口】
+        return jsonify({'matches': final_results})
 
     except Exception as e:
-        # 【加入這行】強迫伺服器把真正的當機原因印在 Render 的 Logs 裡！
         print(f"❌ AI 分析發生嚴重錯誤: {str(e)}", flush=True)
+        traceback.print_exc() # 把詳細錯誤行數印出來
         return jsonify({"error": "內部伺服器錯誤"}), 500
         # ✨ [升級 2: 情感分析] 提示詞要求回傳 sentiment 分數
         prompt = f"使用者搜尋：「{keyword}」。請根據文章摘要，用一句繁體說明重點，並判斷該文章對此關鍵字的「情感分數」(0=極負面/生氣/抱怨，100=極正面/開心/推薦，50=中立/客觀情報)。回傳純 JSON 陣列格式: [{{ \"id\": ID, \"reason\": \"重點\", \"sentiment\": 數字 }}]\n文章列表: {articles_text}"

@@ -24,7 +24,7 @@ CORS(app)
 
 # ==========================================
 # 🔑 設定 GEMINI API KEY (請填寫)
-GEMINI_API_KEY = "AIzaSyCHhlVJIlaQD0LUBFLooEPnxIWoQKtfF2w"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # ==========================================
 
 # --- 資料庫智慧切換（本機用 SQLite，雲端用 PostgreSQL） ---

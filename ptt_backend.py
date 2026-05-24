@@ -227,10 +227,24 @@ def get_hot_topics():
 @app.route('/api/smart_subscribe', methods=['POST'])
 def smart_subscribe():
     try:
-        data = request.get_json(silent=True) or {}
-        keyword = data.get('keyword', '').strip()
-        user_id = data.get('user_id', 'anonymous')
-        if not keyword: return jsonify({'error': '請輸入關鍵字'}), 400
+        # === 監視器：印出前端到底傳了什麼 ===
+        print(f"👉 收到前端請求內容: {request.get_data(as_text=True)}", flush=True)
+        print(f"👉 請求格式 (Content-Type): {request.content_type}", flush=True)
+
+        # === 容錯接收法：不管前端傳 JSON 還是 Form，通通接起來 ===
+        if request.is_json:
+            data = request.get_json(silent=True) or {}
+        else:
+            data = request.form
+
+        # === 雙重保險：同時檢查 keyword 和 keywords 兩種拼法 ===
+        keyword = data.get('keyword') or data.get('keywords') or data.get('search_text') or ''
+        keyword = keyword.strip()
+
+        # 檢查是否真的沒抓到
+        if not keyword:
+            print("❌ 警告：後端真的抓不到關鍵字，請求被退回！", flush=True)
+            return jsonify({'error': '請輸入關鍵字'}), 400
 
         if user_id != 'anonymous':
             db.session.add(SearchHistory(user_id=user_id, keyword=keyword))

@@ -349,19 +349,87 @@ def manage_subscriptions():
 @app.route('/api/recommendations', methods=['GET'])
 def get_recommendations():
     user_id = request.args.get('user_id')
-    if not user_id or user_id == 'Guest': return jsonify([])
+    if not user_id or user_id == 'Guest': 
+        return jsonify([])
+
+    # === 1. 取得使用者的「訂閱關鍵字」 ===
     subs = Subscription.query.filter_by(user_id=user_id).all()
-    kws = list(set([s.keyword for s in subs]))
-    if not kws or not CACHE_DATA['payload']: return jsonify([])
-    
+    sub_kws = [s.keyword for s in subs]
+
+    # === 2. 取得使用者的「近期搜尋歷史」(取最近 20 筆找出不重複的 5 個字) ===
+    histories = SearchHistory.query.filter_by(user_id=user_id).order_by(SearchHistory.search_time.desc()).limit(20).all()
+    hist_kws = []
+    for h in histories:
+        if h.keyword not in hist_kws and h.keyword not in sub_kws:
+            hist_kws.append(h.keyword)
+        if len(hist_kws) >= 5: 
+            break
+
+    # === 3. 統整並清洗關鍵字 (排除純數字、太短的字) ===
+    all_kws = list(set(sub_kws + hist_kws))
+    # 防呆機制：過濾掉全數字(如 2026) 或是單一個字，提升精準度
+    valid_kws = [kw for kw in all_kws if not kw.isdigit() and len(kw) >= 2]
+
+    if not valid_kws: 
+        return jsonify([])
+
     recs = []
-    for a in CACHE_DATA['payload'].get('articles', []):
-        for kw in kws:
-            if kw.lower() in a['title'].lower():
-                recs.append({'board': a['board'], 'title': a['title'], 'url': a['url'], 'reason': f"🔥 今日發燒: {kw}", 'score': a['score']})
-                break
+    seen_urls = set()
+
+    # === 階段一：從快取的首頁熱門文章中尋找 (速度最快) ===
+    if CACHE_DATA['payload']:
+        for a in CACHE_DATA['payload'].get('articles', []):
+            for kw in valid_kws:
+                if kw.lower() in a['title'].lower() and a['url'] not in seen_urls:
+                    # 標示出這篇文章是因為什麼原因推薦的
+                    reason = f"⭐ 專屬訂閱: {kw}" if kw in sub_kws else f"🔍 近期搜尋: {kw}"
+                    recs.append({
+                        'board': a['board'], 
+                        'title': a['title'], 
+                        'url': a['url'], 
+                        'reason': reason, 
+                        'score': a['score']
+                    })
+                    seen_urls.add(a['url'])
+                    break
+
+    # === 階段二：主動出擊！如果推薦數量不到 5 篇，主動去 PTT 抓取填補空缺 ===
+    if len(recs) < 5:
+        # 挑選最重要的關鍵字 (最新訂閱，或是最新搜尋)
+        top_keyword = valid_kws[0] if sub_kws else hist_kws[0]
+        
+        try:
+            session = get_robust_session()
+            # 為了保證速度，我們只挑選幾個流量最大、涵蓋率最廣的看板來當作填補庫
+            fallback_boards = ['Gossiping', 'Stock', 'Tech_Job', 'NBA']
+            extra_results = []
+            
+            for board in fallback_boards:
+                extra_results.extend(search_board_keyword(session, board, top_keyword))
+            
+            # 按照推文分數由高到低排序，確保推薦的都是熱門文章
+            extra_results.sort(key=lambda x: x.score, reverse=True)
+            
+            for a in extra_results:
+                if a.url not in seen_urls:
+                    recs.append({
+                        'board': a.board, 
+                        'title': a.title, 
+                        'url': a.url, 
+                        # 標示為猜你喜歡
+                        'reason': f"💡 猜你喜歡: {top_keyword}", 
+                        'score': a.score
+                    })
+                    seen_urls.add(a.url)
+                # 一旦湊滿 5 篇就提早收工，確保網頁加載速度
+                if len(recs) >= 5:
+                    break
+        except Exception as e:
+            print(f"動態抓取推薦文章失敗: {e}", flush=True)
+
+    # === 最終排序：按照推文數 (熱度) 排序，並最多回傳 7 篇 ===
     recs.sort(key=lambda x: x['score'], reverse=True)
-    return jsonify(recs[:5])
+    return jsonify(recs[:7])
 
 if __name__ == '__main__':
     # 智慧判斷：如果在雲端，讀取 Render 指派的 PORT，否則預設使用 5000

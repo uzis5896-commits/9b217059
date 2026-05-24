@@ -253,15 +253,27 @@ def smart_subscribe():
 
         session = get_robust_session(); all_results = []
         for board in TARGET_BOARDS: all_results.extend(search_board_keyword(session, board, keyword))
-        if not all_results: return jsonify({'matches': []})
+        # 1. 確認搜尋結果是否為空 (這裡是 all_results)
+        if not all_results: 
+            return jsonify({'message': '找不到相關討論'})
 
-        all_results.sort(key=lambda x: x.score, reverse=True); top_15 = all_results[:10]
+        # 2. 排序並取前 10 名
+        all_results.sort(key=lambda x: x.score, reverse=True)
+        top_15 = all_results[:10]
+        
+        # 3. 組裝文字 (這裡是 articles_text)
         articles_text = ""
         for i, a in enumerate(top_15):
             summary = scrape_article_content(session, a.url)[:100].replace('\n', ' ')
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
+
+        # 4. 呼叫 AI (這裡也要用 articles_text)
         prompt = f"請根據以下 PTT 文章內容，給出一個 0~100 的綜合情感分數，並用一句話總結鄉民風向。\n\n文章內容：\n{articles_text}"
         
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(prompt)
+        
+        return jsonify({"result": response.text})       
         # 呼叫 Gemini 模型
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)

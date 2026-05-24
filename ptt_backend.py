@@ -214,7 +214,7 @@ def get_hot_topics():
 def smart_subscribe():
     try:
         data = request.get_json(silent=True) or {}
-        keyword = data.get('keywords', '').strip()
+        keyword = data.get('keyword', '').strip()
         user_id = data.get('user_id', 'anonymous')
         if not keyword: return jsonify({'error': '請輸入關鍵字'}), 400
 
@@ -231,9 +231,20 @@ def smart_subscribe():
         for i, a in enumerate(top_15):
             summary = scrape_article_content(session, a.url)[:100].replace('\n', ' ')
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
+	prompt = f"請根據以下 PTT 文章內容，給出一個 0~100 的綜合情感分數，並用一句話總結鄉民風向。\n\n文章內容：\n{articles_text}"
+        
+        # 呼叫 Gemini 模型
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(prompt)
+        
+        # 【最關鍵的這一行】把 AI 的回答回傳給前端！
+        return jsonify({"result": response.text})
+        
+        # ⬆️⬆️⬆️ 補上這幾行 ⬆️⬆️⬆️
+
     except Exception as e:
-       	# 【加入這行】強迫伺服器把真正的當機原因印在 Render 的 Logs 裡！
-        print(f"❌ AI 分析發生嚴重錯誤: {str(e)}", flush=True) 
+        # 【加入這行】強迫伺服器把真正的當機原因印在 Render 的 Logs 裡！
+        print(f"❌ AI 分析發生嚴重錯誤: {str(e)}", flush=True)
         return jsonify({"error": "內部伺服器錯誤"}), 500
         # ✨ [升級 2: 情感分析] 提示詞要求回傳 sentiment 分數
         prompt = f"使用者搜尋：「{keyword}」。請根據文章摘要，用一句繁體說明重點，並判斷該文章對此關鍵字的「情感分數」(0=極負面/生氣/抱怨，100=極正面/開心/推薦，50=中立/客觀情報)。回傳純 JSON 陣列格式: [{{ \"id\": ID, \"reason\": \"重點\", \"sentiment\": 數字 }}]\n文章列表: {articles_text}"

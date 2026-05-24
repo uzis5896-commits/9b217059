@@ -231,7 +231,7 @@ def smart_subscribe():
         for i, a in enumerate(top_15):
             summary = scrape_article_content(session, a.url)[:100].replace('\n', ' ')
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
-	prompt = f"請根據以下 PTT 文章內容，給出一個 0~100 的綜合情感分數，並用一句話總結鄉民風向。\n\n文章內容：\n{articles_text}"
+        prompt = f"請根據以下 PTT 文章內容，給出一個 0~100 的綜合情感分數，並用一句話總結鄉民風向。\n\n文章內容：\n{articles_text}"
         
         # 呼叫 Gemini 模型
         model = genai.GenerativeModel('gemini-pro')

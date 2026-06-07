@@ -284,48 +284,54 @@ def smart_subscribe():
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
 
         # ✨ [升級 2: 情感分析] 完美接回您原本的 JSON 解析邏輯
+# 🌟 升級版 Prompt：強制 AI 輸出總體風向與指定 JSON 格式
         prompt = f"""
-你是一個專業的網路輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
-請閱讀以下 PTT 熱門文章摘要，並以純 JSON 陣列格式回傳結果。
+        你是一個專業的網路輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
+        請閱讀以下 PTT 熱門文章摘要，並以「純 JSON 格式」回傳結果。
 
-分析標準：
-1. sentiment (0~100): 0為極度悲觀/憤怒，100為極度樂觀/狂熱，50為客觀中立。
-2. stance (立場): 簡短標示立場 (如: 恐慌拋售、逢低買進、看戲中立、吃瓜群眾)。
-3. reason (核心論點): 濃縮這篇文章最核心的一句話論點。
-4. is_sarcasm (是否反串): 若判定鄉民使用反諷語氣，標示 true，否則 false。
+        分析與輸出格式必須嚴格遵守以下 JSON 結構：
+        {{
+          "macro_score": 數字 (0~100，代表整體這批文章的平均情感溫度),
+          "macro_summary": "用一句話總結目前整體的鄉民共識與風向",
+          "articles": [
+            {{
+              "id": 文章ID,
+              "sentiment": 數字 (0~100),
+              "stance": "簡短標示立場 (如: 貪婪買進、看戲中立)",
+              "reason": "濃縮核心論點，說明為什麼鄉民這樣想",
+              "is_sarcasm": 布林值 (true 或 false，判定是否有反串或嘲諷)
+            }}
+          ]
+        }}
 
-回傳格式必須是純 JSON 陣列:
-[
-  {{
-    "id": 0,
-    "sentiment": 20,
-    "stance": "恐慌拋售",
-    "reason": "擔憂外資持續倒貨，認為月線必定失守",
-    "is_sarcasm": false
-  }}
-]
-
-文章列表:
-{articles_text}
-"""
-        # 統一呼叫一次 Gemini 模型
+        文章列表:
+        {articles_text}
+        """
+        
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         
         # 處理 AI 回傳的 JSON 文字
         try: 
             json_str = response.text.replace('```json', '').replace('```', '').strip()
-            matches = json.loads(json_str)
+            ai_data = json.loads(json_str)
+            matches = ai_data.get('articles', [])
+            macro_score = ai_data.get('macro_score', 50)
+            macro_summary = ai_data.get('macro_summary', '目前無明顯共識')
         except Exception as e: 
             print(f"⚠️ JSON 解析失敗: {e}", flush=True)
             matches = []
+            macro_score = 50
+            macro_summary = "無法產生總結"
 
-        match_dict = {m.get('id'): {
-                'reason': m.get('reason', '相關討論'),
+        match_dict = {
+            m.get('id'): {
+                'reason': m.get('reason', '相關討論'), 
                 'sentiment': m.get('sentiment', 50),
-                'stance': m.get('stance', '一般討論'),     # 👈 新增這行
-                'is_sarcasm': m.get('is_sarcasm', False) # 👈 新增這行
-} for m in matches}
+                'stance': m.get('stance', '一般討論'),
+                'is_sarcasm': m.get('is_sarcasm', False)
+            } for m in matches
+        }
         
         final_results = []
         for i, a in enumerate(top_15):
@@ -336,12 +342,16 @@ def smart_subscribe():
                 'score': a.score, 
                 'reason': match_dict.get(i, {}).get('reason', '相關討論'),
                 'sentiment': match_dict.get(i, {}).get('sentiment', 50),
-                'stance': match_dict.get(i, {}).get('stance', '一般討論'),     # 👈 新增這行
-                'is_sarcasm': match_dict.get(i, {}).get('is_sarcasm', False) # 👈 新增這行
+                'stance': match_dict.get(i, {}).get('stance', '一般討論'),
+                'is_sarcasm': match_dict.get(i, {}).get('is_sarcasm', False)
             })
 
-        # 【唯一正確的出口】
-        return jsonify({'matches': final_results})
+        # 🌟 將總體風向球的資料一起打包回傳給前端
+        return jsonify({
+            'macro_score': macro_score,
+            'macro_summary': macro_summary,
+            'matches': final_results
+        })
 
     except Exception as e:
         print(f"❌ AI 分析發生嚴重錯誤: {str(e)}", flush=True)

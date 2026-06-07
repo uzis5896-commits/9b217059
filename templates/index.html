@@ -257,45 +257,64 @@
             const res = await fetch(`${API_BASE}/smart_subscribe`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: userId, keywords: keyword }) });
             const data = await res.json();
             
-            if (data.matches && data.matches.length > 0) {
-                let html = '<div class="list-group list-group-flush">';
-data.matches.forEach(item => {
-    let score = item.sentiment;
-    let color = score >= 65 ? '#2ecc71' : (score <= 35 ? '#e74c3c' : '#f1c40f');
-    let emoji = score >= 65 ? '😄 正向' : (score <= 35 ? '😡 負向' : '😐 中立');
-
-    // 🌟 新增 1：讀取立場，如果沒抓到就預設顯示'一般討論'
-    let stance = item.stance || '一般討論';
-    
-    // 🌟 新增 2：判斷是否反串，是的話就準備一個紅色的警告標籤 HTML
-    let sarcasmBadge = item.is_sarcasm ? '<span class="badge bg-danger ms-2" style="font-size: 0.8em;">⚠️ 疑似反串</span>' : '';
-
-    html += `
-        <a href="${item.url}" target="_blank" class="list-group-item list-group-item-action mb-3 rounded border">
-            <div class="d-flex w-100 justify-content-between mb-1">
-                <h6 class="fw-bold mb-0 text-truncate" style="max-width: 80%;">${item.title}</h6>
-                <small class="text-danger fw-bold">${item.score} 推</small>
+if (data.matches && data.matches.length > 0) {
+            
+            // 🌍 升級一：繪製最上方的「總體風向球」板塊
+            let macroColor = data.macro_score >= 65 ? '#2ecc71' : (data.macro_score <= 35 ? '#e74c3c' : '#f1c40f');
+            let macroEmoji = data.macro_score >= 65 ? '🔥 樂觀熱烈' : (data.macro_score <= 35 ? '❄️ 悲觀/炎上' : '☁️ 觀望中立');
+            
+            let html = `
+            <div class="card mb-4 shadow-sm" style="border-left: 5px solid ${macroColor};">
+                <div class="card-body bg-light">
+                    <h5 class="fw-bold" style="color: ${macroColor};">
+                        🌍 總體情緒溫度：${data.macro_score} 分 (${macroEmoji})
+                    </h5>
+                    <p class="card-text mb-0 mt-2">
+                        <strong>📊 鄉民共識摘要：</strong>「${data.macro_summary}」
+                    </p>
+                </div>
             </div>
+            <div class="list-group list-group-flush">`;
 
-            <!-- 🌟 新增 3：在這裡把立場跟反串標籤印出來 -->
-            <div class="mb-2 mt-1">
-                <span class="badge bg-primary text-white" style="font-size: 0.85em;">立場: ${stance}</span>
-                ${sarcasmBadge}
-            </div>
+            // 開始繪製單篇文章列表
+            data.matches.forEach(item => {
+                let score = item.sentiment;
+                let color = score >= 65 ? '#2ecc71' : (score <= 35 ? '#e74c3c' : '#f1c40f');
+                let emoji = score >= 65 ? '😄 正向' : (score <= 35 ? '😡 負向' : '😐 中立');
+                
+                let stance = item.stance || '一般討論';
+                // 🎭 升級三：超顯眼的反串警告徽章
+                let sarcasmBadge = item.is_sarcasm ? '<span class="badge bg-danger ms-2 shadow-sm">⚠️ 疑似反串</span>' : '';
 
-            <div class="ai-reason text-muted small"> 🤖 <strong>核心論點：</strong>${item.reason}</div>
+                // ⚔️ 升級二：條列式萃取排版
+                html += `
+                    <a href="${item.url}" target="_blank" class="list-group-item list-group-item-action mb-3 rounded border shadow-sm">
+                        <div class="d-flex w-100 justify-content-between mb-2">
+                            <h6 class="fw-bold mb-0 text-truncate" style="max-width: 80%;">${item.title}</h6>
+                            <small class="text-danger fw-bold">${item.score} 推</small>
+                        </div>
 
-            <div class="mt-2 d-flex align-items-center justify-content-between small">
-                <span style="color: ${color}; font-weight: bold;">${emoji} (${score}分)</span>
-            </div>
-            <div class="sentiment-bar">
-                <div class="sentiment-fill" style="width: ${score}%; background-color: ${color};"></div>
-            </div>
-        </a>
-    `;
-});
-                resultArea.innerHTML = html + '</div>';
-            } else {
+                        <div class="bg-light p-2 rounded mb-3 small border">
+                            <div class="mb-1">
+                                <strong>🎯 主要立場：</strong> <span class="badge bg-primary text-white">${stance}</span>
+                                ${sarcasmBadge}
+                            </div>
+                            <div>
+                                <strong>🗣️ 鄉民論點：</strong> <span class="text-muted">${item.reason}</span>
+                            </div>
+                        </div>
+
+                        <div class="mt-2 d-flex align-items-center justify-content-between small">
+                            <span style="color: ${color}; font-weight: bold;">${emoji} (${score}分)</span>
+                        </div>
+                        <div class="sentiment-bar mt-1">
+                            <div class="sentiment-fill" style="width: ${score}%; background-color: ${color}; height: 6px; border-radius: 3px;"></div>
+                        </div>
+                    </a>
+                `;
+            });
+            resultArea.innerHTML = html + '</div>';
+        } else {
                 resultArea.innerHTML = '<div class="text-center p-5">找不到相關討論</div>';
             }
         } catch (e) {

@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PTT 輿情分析系統</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2.1.0/dist/echarts-wordcloud.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-color: #f4f7f6; --card-bg: #ffffff; --text-main: #2c3e50; 
+            --text-muted: #7f8c8d; --border-color: #e2e8f0; 
+            --shadow: 0 4px 15px rgba(0,0,0,0.05); --ai-bg: #f3f0ff;
+        }
+        [data-theme="dark"] {
+            --bg-color: #1a1a2e; --card-bg: #16213e; --text-main: #e2e8f0; 
+            --text-muted: #a0aec0; --border-color: #2d3748; 
+            --shadow: 0 4px 15px rgba(0,0,0,0.3); --ai-bg: #2a2a4a;
+        }
+        body { background-color: var(--bg-color); color: var(--text-main); font-family: 'Segoe UI', sans-serif; transition: all 0.3s ease; padding: 20px;}
+        .card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; box-shadow: var(--shadow); margin-bottom: 20px; overflow: hidden;}
+        .card-header { font-weight: bold; border-bottom: 1px solid var(--border-color); background-color: transparent !important; color: var(--text-main) !important;}
+        .list-group-item { background-color: var(--card-bg); color: var(--text-main); border-color: var(--border-color); transition: 0.2s;}
+        .list-group-item:hover { transform: translateX(5px); background-color: var(--ai-bg); }
+        .ai-reason { color: #8e44ad; font-size: 0.9rem; background: var(--ai-bg); padding: 8px 12px; border-radius: 8px; margin-top: 8px; border-left: 4px solid #9b59b6;}
+        .sentiment-bar { height: 6px; border-radius: 3px; background-color: #e2e8f0; margin-top: 5px; overflow: hidden; position: relative;}
+        .sentiment-fill { height: 100%; transition: width 1s ease-in-out; }
+        .sub-tag { cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1);}
+        .sub-tag:hover { transform: translateY(-2px); }
+        .user-controls { background: var(--card-bg); padding: 5px 15px; border-radius: 20px; border: 1px solid var(--border-color); }
+        .btn-theme { background: transparent; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 20px;}
+    </style>
+</head>
+<body>
+
+<div class="container-fluid max-w-7xl">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <h1 class="h3 fw-bold mb-0">📊 PTT 輿情分析</h1>
+        
+        <div class="d-flex align-items-center gap-3">
+            <button class="btn btn-theme px-3" onclick="toggleTheme()" id="theme-btn">🌙 深色模式</button>
+            <div class="user-controls d-flex align-items-center">
+                <span class="small me-2" style="color: var(--text-muted)">目前使用者:</span>
+                <strong id="user-id-display" class="text-primary">載入中...</strong>
+                <button class="btn btn-sm btn-outline-primary ms-3 rounded-pill" onclick="trySwitchUser()">👤 切換</button>
+            </div>
+            <span class="badge bg-warning rounded-pill px-3 py-2 text-dark" id="status-badge">系統初始化中...</span>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-3">
+            <div class="card border-info" id="recommendation-card">
+                <div class="card-header text-info">🎯 專屬推薦</div>
+                <div class="card-body p-2" id="recommendation-list">
+                    <div class="text-center p-3 small" style="color: var(--text-muted)">等待連線...</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">🔍 AI 智慧搜尋</div>
+                <div class="card-body">
+                    <div class="input-group mb-3">
+                        <input type="text" id="subscribe-input" class="form-control" placeholder="輸入關鍵字...">
+                        <button class="btn btn-outline-danger" onclick="addSubscription()">❤️</button>
+                    </div>
+                    <button class="btn btn-primary w-100 rounded-pill" onclick="checkSubscription()" id="ai-btn">開始深度分析</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header d-flex justify-content-between">
+                    <span>⭐ 我的訂閱</span>
+                    <span id="sub-count" class="badge bg-secondary">0</span>
+                </div>
+                <div class="card-body">
+                    <div id="sub-list" class="d-flex flex-wrap gap-2"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>🤖 AI 語意與情感分析結果</span>
+                </div>
+                <div class="card-body p-0" style="min-height: 400px; max-height: 700px; overflow-y: auto;">
+                    <div id="ai-results-area" class="p-3">
+                        <div class="text-center mt-5" style="color: var(--text-muted)">
+                            <h5>等待指令中</h5>
+                            <p>輸入關鍵字，AI 將為您判斷文章重點與群眾情緒。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-3">
+            <div class="card">
+                <div class="card-header">📈 歷史聲量趨勢 (7天)</div>
+                <div class="card-body p-1">
+                    <div id="trendChart" style="height: 250px; width: 100%;"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">☁️ 全站即時熱門關鍵字</div>
+                <div class="card-body p-1">
+                    <div id="wordcloud" style="height: 250px; width: 100%;"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">🔥 今日首頁熱文</div>
+                <div class="card-body p-0">
+                    <div class="list-group list-group-flush" id="hot-list" style="height: 300px; overflow-y: auto;">
+                        <div class="text-center p-3 text-muted small">載入中...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ⚠️ 關鍵防呆：改用相對路徑，徹底解決網址輸入錯誤的問題
+    const API_BASE = '/api';
+    
+    let userId = 'Guest';
+    let wordChart = null;
+    let trendChartEchart = null;
+
+    // --- 主題切換 (Dark Mode) ---
+    function toggleTheme() {
+        const body = document.body;
+        if (body.getAttribute('data-theme') === 'dark') {
+            body.removeAttribute('data-theme');
+            document.getElementById('theme-btn').innerText = '🌙 深色模式';
+        } else {
+            body.setAttribute('data-theme', 'dark');
+            document.getElementById('theme-btn').innerText = '☀️ 淺色模式';
+        }
+    }
+
+    function initUser() {
+        userId = localStorage.getItem('ptt_user_id') || 'Guest';
+        document.getElementById('user-id-display').innerText = userId;
+    }
+
+    function trySwitchUser() {
+        const newName = prompt("請輸入您的使用者名稱：", userId);
+        if (newName && newName.trim() !== '') {
+            userId = newName.trim();
+            localStorage.setItem('ptt_user_id', userId);
+            document.getElementById('user-id-display').innerText = userId;
+            loadSubscriptions();
+            alert(`👋 歡迎，${userId}！`);
+        }
+    }
+
+    async function loadRecommendations() {
+        const list = document.getElementById('recommendation-list');
+        if (userId === 'Guest') return list.innerHTML = '<div class="text-center p-3 small text-muted">請先登入</div>';
+        
+        try {
+            const res = await fetch(`${API_BASE}/recommendations?user_id=${encodeURIComponent(userId)}`);
+            const recs = await res.json();
+            if (recs && recs.length > 0) {
+                let html = '<div class="list-group list-group-flush">';
+                recs.forEach(item => {
+                    html += `<a href="${item.url}" target="_blank" class="list-group-item p-2 border-0 border-bottom">
+                                <div class="fw-bold" style="font-size: 0.9rem;">${item.title}</div>
+                                <small class="text-info">${item.reason}</small>
+                             </a>`;
+                });
+                list.innerHTML = html + '</div>';
+            } else {
+                list.innerHTML = '<div class="text-center p-3 small text-muted">目前無推薦，請訂閱關鍵字</div>';
+            }
+        } catch (e) { list.innerHTML = '<div class="text-center p-3 small text-danger">推薦系統連線失敗</div>'; }
+    }
+
+    async function loadSubscriptions() {
+        try {
+            const res = await fetch(`${API_BASE}/subscriptions?user_id=${encodeURIComponent(userId)}`);
+            const subs = await res.json();
+            const container = document.getElementById('sub-list');
+            document.getElementById('sub-count').innerText = subs.length;
+            
+            if (subs.length === 0) {
+                container.innerHTML = '<small class="text-muted">尚無訂閱</small>';
+            } else {
+                container.innerHTML = '';
+                subs.forEach(sub => {
+                    container.innerHTML += `<span class="badge bg-secondary sub-tag p-2 fs-6 mb-1">
+                        <span onclick="triggerSearch('${sub.keyword}')">${sub.keyword}</span>
+                        <span class="ms-2 text-white-50" onclick="deleteSubscription(${sub.id})">&times;</span>
+                    </span>`;
+                });
+            }
+            loadRecommendations();
+        } catch (e) {}
+    }
+
+    async function addSubscription() {
+        const keyword = document.getElementById('subscribe-input').value.trim();
+        if (!keyword) return;
+        await fetch(`${API_BASE}/subscriptions`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: userId, keyword: keyword }) });
+        loadSubscriptions();
+    }
+    
+    async function deleteSubscription(id) {
+        await fetch(`${API_BASE}/subscriptions`, { method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: userId, id: id }) });
+        loadSubscriptions();
+    }
+
+    function triggerSearch(keyword) {
+        document.getElementById('subscribe-input').value = keyword;
+        checkSubscription();
+    }
+
+    async function drawTrendChart(keyword) {
+        trendChartEchart.showLoading();
+        try {
+            const res = await fetch(`${API_BASE}/trend?keyword=${encodeURIComponent(keyword)}`);
+            const data = await res.json();
+            trendChartEchart.hideLoading();
+            trendChartEchart.setOption({
+                title: {show: false},
+                tooltip: { trigger: 'axis' },
+                grid: { top: 30, right: 20, bottom: 30, left: 40 },
+                xAxis: { type: 'category', data: data.dates, axisLabel: { color: 'gray' } },
+                yAxis: { type: 'value', axisLabel: { color: 'gray' } },
+                series: [{
+                    data: data.volumes, type: 'line', smooth: true,
+                    lineStyle: { color: '#3498db', width: 3 },
+                    areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{offset: 0, color: 'rgba(52,152,219,0.5)'}, {offset: 1, color: 'rgba(52,152,219,0)'}]) }
+                }]
+            });
+        } catch(e) { trendChartEchart.hideLoading(); }
+    }
+
+    async function checkSubscription() {
+        const keyword = document.getElementById('subscribe-input').value;
+        const resultArea = document.getElementById('ai-results-area');
+        const btn = document.getElementById('ai-btn');
+        if (!keyword) return alert("請輸入關鍵字");
+
+        btn.disabled = true; btn.innerText = '🧠 深度運算中...';
+        resultArea.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary"></div><p class="mt-3">AI 正在閱讀文章並分析群眾情感...</p></div>';
+
+        drawTrendChart(keyword);
+
+        try {
+            const res = await fetch(`${API_BASE}/smart_subscribe`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: userId, keywords: keyword }) });
+            const data = await res.json();
+            
+            if (data.matches && data.matches.length > 0) {
+                let html = '<div class="list-group list-group-flush">';
+data.matches.forEach(item => {
+    let score = item.sentiment;
+    let color = score >= 65 ? '#2ecc71' : (score <= 35 ? '#e74c3c' : '#f1c40f');
+    let emoji = score >= 65 ? '😄 正向' : (score <= 35 ? '😡 負向' : '😐 中立');
+
+    // 🌟 新增 1：讀取立場，如果沒抓到就預設顯示'一般討論'
+    let stance = item.stance || '一般討論';
+    
+    // 🌟 新增 2：判斷是否反串，是的話就準備一個紅色的警告標籤 HTML
+    let sarcasmBadge = item.is_sarcasm ? '<span class="badge bg-danger ms-2" style="font-size: 0.8em;">⚠️ 疑似反串</span>' : '';
+
+    html += `
+        <a href="${item.url}" target="_blank" class="list-group-item list-group-item-action mb-3 rounded border">
+            <div class="d-flex w-100 justify-content-between mb-1">
+                <h6 class="fw-bold mb-0 text-truncate" style="max-width: 80%;">${item.title}</h6>
+                <small class="text-danger fw-bold">${item.score} 推</small>
+            </div>
+
+            <!-- 🌟 新增 3：在這裡把立場跟反串標籤印出來 -->
+            <div class="mb-2 mt-1">
+                <span class="badge bg-primary text-white" style="font-size: 0.85em;">立場: ${stance}</span>
+                ${sarcasmBadge}
+            </div>
+
+            <div class="ai-reason text-muted small"> 🤖 <strong>核心論點：</strong>${item.reason}</div>
+
+            <div class="mt-2 d-flex align-items-center justify-content-between small">
+                <span style="color: ${color}; font-weight: bold;">${emoji} (${score}分)</span>
+            </div>
+            <div class="sentiment-bar">
+                <div class="sentiment-fill" style="width: ${score}%; background-color: ${color};"></div>
+            </div>
+        </a>
+    `;
+});
+                resultArea.innerHTML = html + '</div>';
+            } else {
+                resultArea.innerHTML = '<div class="text-center p-5">找不到相關討論</div>';
+            }
+        } catch (e) {
+            resultArea.innerHTML = `<div class="alert alert-danger">連線錯誤，請檢查後端</div>`;
+        } finally {
+            btn.disabled = false; btn.innerText = '開始深度分析';
+        }
+    }
+
+    async function init() {
+        console.log("🚀 網頁初始化啟動...");
+        
+        // 檢查圖表套件是否載入成功
+        if (typeof echarts === 'undefined') {
+            document.getElementById('hot-list').innerHTML = '<div class="text-center p-3 text-danger fw-bold">錯誤：無法載入圖表套件<br>請檢查網路，或關閉擋廣告軟體 (AdBlock) 後重新整理。</div>';
+            return;
+        }
+
+        initUser();
+        wordChart = echarts.init(document.getElementById('wordcloud'));
+        trendChartEchart = echarts.init(document.getElementById('trendChart'));
+        trendChartEchart.setOption({ title: { text: '請搜尋關鍵字', textStyle: {color: 'gray', fontSize: 14}, left: 'center', top: 'center' }});
+        
+        try {
+            document.getElementById('hot-list').innerHTML = '<div class="text-center p-4 text-primary"><div class="spinner-border spinner-border-sm"></div> <br>正與 PTT 伺服器連線中<br>(初次載入約需 10~20 秒)...</div>';
+            
+            // 呼叫相對路徑 API
+            const res = await fetch(`${API_BASE}/hot_topics`);
+            const data = await res.json();
+            
+            if (data.error) throw new Error(data.error);
+            
+            const colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6'];
+            wordChart.setOption({
+                series: [{
+                    type: 'wordCloud', sizeRange: [12, 50], rotationRange: [0, 0], shape: 'circle',
+                    textStyle: { fontWeight: 'bold', color: () => colors[Math.floor(Math.random() * colors.length)] },
+                    data: data.keywords.map(k => ({name: k[0], value: k[1]}))
+                }]
+            });
+            
+            const list = document.getElementById('hot-list');
+            list.innerHTML = '';
+            data.articles.slice(0, 20).forEach(a => {
+                list.innerHTML += `
+                    <a href="${a.url}" target="_blank" class="list-group-item list-group-item-action p-2">
+                        <div class="d-flex w-100 justify-content-between mb-1">
+                            <span class="badge bg-secondary" style="font-size: 0.7rem;">${a.board}</span>
+                            <small class="text-danger fw-bold">${a.score} 推</small>
+                        </div>
+                        <div class="mb-0 text-truncate fw-bold" style="font-size: 0.9rem;" title="${a.title}">${a.title}</div>
+                    </a>`;
+            });
+
+            loadSubscriptions();
+            document.getElementById('status-badge').className = 'badge bg-success rounded-pill px-3 py-2'; 
+            document.getElementById('status-badge').innerText = '系統連線正常';
+
+        } catch (e) { 
+            console.error("❌ 系統初始化失敗:", e);
+            document.getElementById('status-badge').className = 'badge bg-danger rounded-pill px-3 py-2'; 
+            document.getElementById('status-badge').innerText = '連線異常'; 
+            document.getElementById('hot-list').innerHTML = `<div class="text-center p-3 text-danger small">載入失敗：<br>${e.message}<br>請確認後端 Python 伺服器已啟動。</div>`;
+            wordChart.setOption({ title: { text: '無法載入文字雲', textStyle: {color: 'red', fontSize: 14}, left: 'center', top: 'center' }});
+        }
+    }
+
+    // 啟動！
+    init();
+    window.addEventListener('resize', () => { if(wordChart) wordChart.resize(); if(trendChartEchart) trendChartEchart.resize(); });
+</script>
+</body>
+</html>

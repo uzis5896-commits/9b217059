@@ -320,7 +320,12 @@ def smart_subscribe():
             print(f"⚠️ JSON 解析失敗: {e}", flush=True)
             matches = []
 
-        match_dict = {m.get('id'): {'reason': m.get('reason', '相關討論'), 'sentiment': m.get('sentiment', 50)} for m in matches}
+        match_dict = {m.get('id'): {
+                'reason': m.get('reason', '相關討論'),
+                'sentiment': m.get('sentiment', 50),
+                'stance': m.get('stance', '一般討論'),     # 👈 新增這行
+                'is_sarcasm': m.get('is_sarcasm', False) # 👈 新增這行
+} for m in matches}
         
         final_results = []
         for i, a in enumerate(top_15):
@@ -330,7 +335,9 @@ def smart_subscribe():
                 'url': a.url, 
                 'score': a.score, 
                 'reason': match_dict.get(i, {}).get('reason', '相關討論'),
-                'sentiment': match_dict.get(i, {}).get('sentiment', 50)
+                'sentiment': match_dict.get(i, {}).get('sentiment', 50),
+                'stance': match_dict.get(i, {}).get('stance', '一般討論'),     # 👈 新增這行
+                'is_sarcasm': match_dict.get(i, {}).get('is_sarcasm', False) # 👈 新增這行
             })
 
         # 【唯一正確的出口】

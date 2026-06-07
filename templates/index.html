@@ -259,27 +259,41 @@
             
             if (data.matches && data.matches.length > 0) {
                 let html = '<div class="list-group list-group-flush">';
-                data.matches.forEach(item => {
-                    let score = item.sentiment;
-                    let color = score >= 65 ? '#2ecc71' : (score <= 35 ? '#e74c3c' : '#f1c40f');
-                    let emoji = score >= 65 ? '😊 正向' : (score <= 35 ? '😠 負向' : '😐 中立');
+data.matches.forEach(item => {
+    let score = item.sentiment;
+    let color = score >= 65 ? '#2ecc71' : (score <= 35 ? '#e74c3c' : '#f1c40f');
+    let emoji = score >= 65 ? '😄 正向' : (score <= 35 ? '😡 負向' : '😐 中立');
 
-                    html += `
-                        <a href="${item.url}" target="_blank" class="list-group-item list-group-item-action mb-3 rounded border">
-                            <div class="d-flex w-100 justify-content-between mb-1">
-                                <h6 class="fw-bold mb-0 text-truncate" style="max-width: 80%;">${item.title}</h6>
-                                <small class="text-danger fw-bold">${item.score} 推</small>
-                            </div>
-                            <div class="ai-reason">🤖 ${item.reason}</div>
-                            
-                            <div class="mt-2 d-flex align-items-center justify-content-between small">
-                                <span style="color: ${color}; font-weight: bold;">${emoji} (${score}分)</span>
-                            </div>
-                            <div class="sentiment-bar">
-                                <div class="sentiment-fill" style="width: ${score}%; background-color: ${color};"></div>
-                            </div>
-                        </a>`;
-                });
+    // 🌟 新增 1：讀取立場，如果沒抓到就預設顯示'一般討論'
+    let stance = item.stance || '一般討論';
+    
+    // 🌟 新增 2：判斷是否反串，是的話就準備一個紅色的警告標籤 HTML
+    let sarcasmBadge = item.is_sarcasm ? '<span class="badge bg-danger ms-2" style="font-size: 0.8em;">⚠️ 疑似反串</span>' : '';
+
+    html += `
+        <a href="${item.url}" target="_blank" class="list-group-item list-group-item-action mb-3 rounded border">
+            <div class="d-flex w-100 justify-content-between mb-1">
+                <h6 class="fw-bold mb-0 text-truncate" style="max-width: 80%;">${item.title}</h6>
+                <small class="text-danger fw-bold">${item.score} 推</small>
+            </div>
+
+            <!-- 🌟 新增 3：在這裡把立場跟反串標籤印出來 -->
+            <div class="mb-2 mt-1">
+                <span class="badge bg-primary text-white" style="font-size: 0.85em;">立場: ${stance}</span>
+                ${sarcasmBadge}
+            </div>
+
+            <div class="ai-reason text-muted small"> 🤖 <strong>核心論點：</strong>${item.reason}</div>
+
+            <div class="mt-2 d-flex align-items-center justify-content-between small">
+                <span style="color: ${color}; font-weight: bold;">${emoji} (${score}分)</span>
+            </div>
+            <div class="sentiment-bar">
+                <div class="sentiment-fill" style="width: ${score}%; background-color: ${color};"></div>
+            </div>
+        </a>
+    `;
+});
                 resultArea.innerHTML = html + '</div>';
             } else {
                 resultArea.innerHTML = '<div class="text-center p-5">找不到相關討論</div>';

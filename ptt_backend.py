@@ -81,13 +81,16 @@ TARGET_BOARDS = [
     'Tech_Job',    # 科技工作版 (科技產業脈動與職場薪資趨勢)
     'Car',         # 汽車版 (車市消費與機械硬體討論)
     'Lifeismoney'  # 省錢總動員 (常民消費行為與最即時的優惠熱點)
-]# 升級版 PTT 專屬停用詞庫
+]
+# 升級版 PTT 專屬停用詞庫 (包含 PTT 文化與雜訊)
 STOP_WORDS = {
     '的', '是', '在', '我', '你', '他', '我們', '你們', '他們',
-    '問卦', '公告', '新聞', '情報', '問題', '討論', '分享', '心得', '請益', '閒聊', 'Re', '發錢', '爆卦', '協尋',
+    '問卦', '公告', '新聞', '情報', '問題', '討論', '分享', '心得', '請益', '閒聊', 're', '發錢', '爆卦', '協尋',
     '有沒有', '怎麼', '什麼', '為什麼', '如果', '可以', '覺得', '不會', '一樣', '知道',
     '這', '那', '就', '了', '也', '不', '嗎', '啊', '呢', '吧', '都', '還', '又', '跟', '被', '讓', '把', '與', '及',
-    '一個', '現在', '今天', '台灣', '真的', '大家', '還是', '只是', '所以', '因為', '但是', '花邊', '10', '05', '18', '15'
+    '一個', '現在', '今天', '台灣', '真的', '大家', '還是', '只是', '所以', '因為', '但是', '花邊',
+    # ⬇️ 新增的 PTT 專屬雜訊與排版字眼
+    '集中', '置底', '盤後', '盤後閒', '一般', '整理', '贈送', '申訴', '集點', '代碼', 'schedule', 'fw', 'vs', '標題', '系列'
 }
 CACHE_DATA = {'timestamp': None, 'payload': None}
 CACHE_DURATION = 180 
@@ -212,8 +215,22 @@ def get_hot_topics():
             print("❌ 錯誤：無法從 PTT 取得任何文章！")
             return jsonify({'error': '無法取得文章'}), 500
             
+# 將所有文章標題接在一起給 jieba 斷詞
         words = jieba.cut("".join([a.title for a in top]))
-        counts = Counter([w for w in words if len(w)>1 and w not in STOP_WORDS])
+        
+        # 🛡️ 升級版過濾機制：
+        # 1. len(w.strip()) > 1: 確保不是空白或單一個字
+        # 2. w.lower() not in STOP_WORDS: 轉成小寫比對，無視大小寫 (例如 VS, vs 都能濾掉)
+        # 3. not w.isdigit(): 終極殺招！只要是純數字 (如 2026, 08, 09, 30) 直接無情剔除
+        
+        filtered_words = [
+            w.strip() for w in words 
+            if len(w.strip()) > 1 
+            and w.strip().lower() not in STOP_WORDS 
+            and not w.strip().isdigit()
+        ]
+        
+        counts = Counter(filtered_words)
         
         payload = {
             'articles': [a.to_dict() for a in top], 

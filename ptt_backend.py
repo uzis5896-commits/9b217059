@@ -284,8 +284,30 @@ def smart_subscribe():
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
 
         # ✨ [升級 2: 情感分析] 完美接回您原本的 JSON 解析邏輯
-        prompt = f"使用者搜尋：「{keyword}」。請根據文章摘要，用一句繁體說明重點，並判斷該文章對此關鍵字的「情感分數」(0=極負面/生氣/抱怨，100=極正面/開心/推薦，50=中立/客觀情報)。回傳純 JSON 陣列格式: [{{\n  \"id\": ID,\n  \"reason\": \"重點\",\n  \"sentiment\": 數字\n}}]\n文章列表:\n{articles_text}"
-        
+        prompt = f"""
+你是一個專業的網路輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
+請閱讀以下 PTT 熱門文章摘要，並以純 JSON 陣列格式回傳結果。
+
+分析標準：
+1. sentiment (0~100): 0為極度悲觀/憤怒，100為極度樂觀/狂熱，50為客觀中立。
+2. stance (立場): 簡短標示立場 (如: 恐慌拋售、逢低買進、看戲中立、吃瓜群眾)。
+3. reason (核心論點): 濃縮這篇文章最核心的一句話論點。
+4. is_sarcasm (是否反串): 若判定鄉民使用反諷語氣，標示 true，否則 false。
+
+回傳格式必須是純 JSON 陣列:
+[
+  {{
+    "id": 0,
+    "sentiment": 20,
+    "stance": "恐慌拋售",
+    "reason": "擔憂外資持續倒貨，認為月線必定失守",
+    "is_sarcasm": false
+  }}
+]
+
+文章列表:
+{articles_text}
+"""
         # 統一呼叫一次 Gemini 模型
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)

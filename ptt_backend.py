@@ -115,10 +115,20 @@ def scrape_article_content(session, url):
         soup = BeautifulSoup(res.text, 'html.parser')
         main_content = soup.find(id="main-content")
         if not main_content: return ""
-        for tag in main_content.find_all(['div', 'span'], class_=['article-metaline', 'article-metaline-right', 'push', 'f2']): tag.extract()
-        return main_content.get_text().strip()
-    except: return ""
 
+        # 🌟 新增：抓取前 15 則留言，讓 AI 能判斷留言區風向
+        pushes = main_content.find_all('div', class_='push')
+        push_text = " ".join([p.text.strip().replace('\n', ' ') for p in pushes[:15]])
+
+        # 移除雜訊與留言，萃取發文者的主文
+        for tag in main_content.find_all(['div', 'span'], class_=['article-metaline', 'article-metaline-right', 'push', 'f2']): 
+            tag.extract()
+        
+        article_text = main_content.get_text().strip()[:100].replace('\n', ' ')
+        
+        # 將發文者與留言區的內容組合起來，送給 AI
+        return f"【發文者】：{article_text} | 【留言區】：{push_text}"
+    except: return ""
 def search_board_keyword(session, board, keyword):
     search_url = f"https://www.ptt.cc/bbs/{board}/search?q={keyword}"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
@@ -284,10 +294,10 @@ def smart_subscribe():
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
 
         # ✨ [升級 2: 情感分析] 完美接回您原本的 JSON 解析邏輯
-# 🌟 升級版 Prompt：強制 AI 輸出總體風向與指定 JSON 格式
+# 🌟 升級版 Prompt：強制拆分「發文者」與「留言區」的溫度
         prompt = f"""
         你是一個專業的網路輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
-        請閱讀以下 PTT 熱門文章摘要，並以「純 JSON 格式」回傳結果。
+        請閱讀以下 PTT 熱門文章摘要（包含發文者與留言區），並以「純 JSON 格式」回傳結果。
 
         分析與輸出格式必須嚴格遵守以下 JSON 結構：
         {{
@@ -296,10 +306,11 @@ def smart_subscribe():
           "articles": [
             {{
               "id": 文章ID,
-              "sentiment": 數字 (0~100),
+              "author_temp": 數字 (0~100，發文者的情緒溫度),
+              "comment_temp": 數字 (0~100，留言區的情緒溫度),
               "stance": "簡短標示立場 (如: 貪婪買進、看戲中立)",
-              "reason": "濃縮核心論點，說明為什麼鄉民這樣想",
-              "is_sarcasm": 布林值 (true 或 false，判定是否有反串或嘲諷)
+              "reason": "綜合評估發文與留言，濃縮核心論點與衝突點",
+              "is_sarcasm": 布林值 (若發文者或留言有反串嘲諷，標示 true)
             }}
           ]
         }}
@@ -311,7 +322,6 @@ def smart_subscribe():
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         
-        # 處理 AI 回傳的 JSON 文字
         try: 
             json_str = response.text.replace('```json', '').replace('```', '').strip()
             ai_data = json.loads(json_str)
@@ -324,10 +334,12 @@ def smart_subscribe():
             macro_score = 50
             macro_summary = "無法產生總結"
 
+        # 🌟 修改打包字典，接住雙溫度
         match_dict = {
             m.get('id'): {
                 'reason': m.get('reason', '相關討論'), 
-                'sentiment': m.get('sentiment', 50),
+                'author_temp': m.get('author_temp', 50),
+                'comment_temp': m.get('comment_temp', 50),
                 'stance': m.get('stance', '一般討論'),
                 'is_sarcasm': m.get('is_sarcasm', False)
             } for m in matches
@@ -341,18 +353,17 @@ def smart_subscribe():
                 'url': a.url, 
                 'score': a.score, 
                 'reason': match_dict.get(i, {}).get('reason', '相關討論'),
-                'sentiment': match_dict.get(i, {}).get('sentiment', 50),
+                'author_temp': match_dict.get(i, {}).get('author_temp', 50),
+                'comment_temp': match_dict.get(i, {}).get('comment_temp', 50),
                 'stance': match_dict.get(i, {}).get('stance', '一般討論'),
                 'is_sarcasm': match_dict.get(i, {}).get('is_sarcasm', False)
             })
 
-        # 🌟 將總體風向球的資料一起打包回傳給前端
         return jsonify({
             'macro_score': macro_score,
             'macro_summary': macro_summary,
             'matches': final_results
         })
-
     except Exception as e:
         print(f"❌ AI 分析發生嚴重錯誤: {str(e)}", flush=True)
         traceback.print_exc() # 把詳細錯誤行數印出來

@@ -277,16 +277,16 @@ if (data.matches && data.matches.length > 0) {
             <div class="list-group list-group-flush">`;
 
             // 開始繪製單篇文章列表
-            data.matches.forEach(item => {
-                let score = item.sentiment;
-                let color = score >= 65 ? '#2ecc71' : (score <= 35 ? '#e74c3c' : '#f1c40f');
-                let emoji = score >= 65 ? '😄 正向' : (score <= 35 ? '😡 負向' : '😐 中立');
+data.matches.forEach(item => {
+                // 🌟 分別設定發文者與留言區的溫度與顏色
+                let aTemp = item.author_temp;
+                let cTemp = item.comment_temp;
+                let aColor = aTemp >= 65 ? '#2ecc71' : (aTemp <= 35 ? '#e74c3c' : '#f1c40f');
+                let cColor = cTemp >= 65 ? '#2ecc71' : (cTemp <= 35 ? '#e74c3c' : '#f1c40f');
                 
                 let stance = item.stance || '一般討論';
-                // 🎭 升級三：超顯眼的反串警告徽章
                 let sarcasmBadge = item.is_sarcasm ? '<span class="badge bg-danger ms-2 shadow-sm">⚠️ 疑似反串</span>' : '';
 
-                // ⚔️ 升級二：條列式萃取排版
                 html += `
                     <a href="${item.url}" target="_blank" class="list-group-item list-group-item-action mb-3 rounded border shadow-sm">
                         <div class="d-flex w-100 justify-content-between mb-2">
@@ -300,15 +300,19 @@ if (data.matches && data.matches.length > 0) {
                                 ${sarcasmBadge}
                             </div>
                             <div>
-                                <strong>🗣️ 鄉民論點：</strong> <span class="text-muted">${item.reason}</span>
+                                <strong>🗣️ 衝突與論點：</strong> <span class="text-muted">${item.reason}</span>
                             </div>
                         </div>
 
-                        <div class="mt-2 d-flex align-items-center justify-content-between small">
-                            <span style="color: ${color}; font-weight: bold;">${emoji} (${score}分)</span>
-                        </div>
-                        <div class="sentiment-bar mt-1">
-                            <div class="sentiment-fill" style="width: ${score}%; background-color: ${color}; height: 6px; border-radius: 3px;"></div>
+                        <div class="row text-center mt-2">
+                            <div class="col-6 border-end">
+                                <div class="text-muted small fw-bold mb-1">📝 發文者溫度</div>
+                                <div class="fs-5 fw-bold" style="color: ${aColor};">${aTemp}°C</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="text-muted small fw-bold mb-1">💬 留言區溫度</div>
+                                <div class="fs-5 fw-bold" style="color: ${cColor};">${cTemp}°C</div>
+                            </div>
                         </div>
                     </a>
                 `;

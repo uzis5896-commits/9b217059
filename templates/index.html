@@ -4,391 +4,439 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PTT 輿情分析系統</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2.1.0/dist/echarts-wordcloud.min.js"></script>
-    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- ECharts -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: { bg: '#0f172a', card: '#1e293b', border: '#334155', text: '#f8fafc', muted: '#94a3b8' },
+                        light: { bg: '#f1f5f9', card: '#ffffff', border: '#e2e8f0', text: '#0f172a', muted: '#64748b' }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        :root {
-            --bg-color: #f4f7f6; --card-bg: #ffffff; --text-main: #2c3e50; 
-            --text-muted: #7f8c8d; --border-color: #e2e8f0; 
-            --shadow: 0 4px 15px rgba(0,0,0,0.05); --ai-bg: #f3f0ff;
-        }
-        [data-theme="dark"] {
-            --bg-color: #1a1a2e; --card-bg: #16213e; --text-main: #e2e8f0; 
-            --text-muted: #a0aec0; --border-color: #2d3748; 
-            --shadow: 0 4px 15px rgba(0,0,0,0.3); --ai-bg: #2a2a4a;
-        }
-        body { background-color: var(--bg-color); color: var(--text-main); font-family: 'Segoe UI', sans-serif; transition: all 0.3s ease; padding: 20px;}
-        .card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; box-shadow: var(--shadow); margin-bottom: 20px; overflow: hidden;}
-        .card-header { font-weight: bold; border-bottom: 1px solid var(--border-color); background-color: transparent !important; color: var(--text-main) !important;}
-        .list-group-item { background-color: var(--card-bg); color: var(--text-main); border-color: var(--border-color); transition: 0.2s;}
-        .list-group-item:hover { transform: translateX(5px); background-color: var(--ai-bg); }
-        .ai-reason { color: #8e44ad; font-size: 0.9rem; background: var(--ai-bg); padding: 8px 12px; border-radius: 8px; margin-top: 8px; border-left: 4px solid #9b59b6;}
-        .sentiment-bar { height: 6px; border-radius: 3px; background-color: #e2e8f0; margin-top: 5px; overflow: hidden; position: relative;}
-        .sentiment-fill { height: 100%; transition: width 1s ease-in-out; }
-        .sub-tag { cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1);}
-        .sub-tag:hover { transform: translateY(-2px); }
-        .user-controls { background: var(--card-bg); padding: 5px 15px; border-radius: 20px; border: 1px solid var(--border-color); }
-        .btn-theme { background: transparent; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 20px;}
+        body { transition: background-color 0.3s, color 0.3s; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        /* 隱藏滾動條但保持可滾動 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .dark ::-webkit-scrollbar-thumb { background: #475569; }
+        
+        /* 溫度計進度條動畫 */
+        .progress-bar-fill { transition: width 1s cubic-bezier(0.4, 0, 0.2, 1); }
     </style>
 </head>
-<body>
+<body class="bg-light-bg text-light-text dark:bg-dark-bg dark:text-dark-text min-h-screen p-4 md:p-6 transition-colors duration-300">
 
-<div class="container-fluid max-w-7xl">
-    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-        <h1 class="h3 fw-bold mb-0">📊 PTT 輿情分析</h1>
+    <div class="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        <div class="d-flex align-items-center gap-3">
-            <button class="btn btn-theme px-3" onclick="toggleTheme()" id="theme-btn">🌙 深色模式</button>
-            <div class="user-controls d-flex align-items-center">
-                <span class="small me-2" style="color: var(--text-muted)">目前使用者:</span>
-                <strong id="user-id-display" class="text-primary">載入中...</strong>
-                <button class="btn btn-sm btn-outline-primary ms-3 rounded-pill" onclick="trySwitchUser()">👤 切換</button>
-            </div>
-            <span class="badge bg-warning rounded-pill px-3 py-2 text-dark" id="status-badge">系統初始化中...</span>
-        </div>
-    </div>
-
-    <div class="row">
-        <div class="col-lg-3">
-            <div class="card border-info" id="recommendation-card">
-                <div class="card-header text-info">🎯 專屬推薦</div>
-                <div class="card-body p-2" id="recommendation-list">
-                    <div class="text-center p-3 small" style="color: var(--text-muted)">等待連線...</div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-header">🔍 AI 智慧搜尋</div>
-                <div class="card-body">
-                    <div class="input-group mb-3">
-                        <input type="text" id="subscribe-input" class="form-control" placeholder="輸入關鍵字...">
-                        <button class="btn btn-outline-danger" onclick="addSubscription()">❤️</button>
-                    </div>
-                    <button class="btn btn-primary w-100 rounded-pill" onclick="checkSubscription()" id="ai-btn">開始深度分析</button>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-header d-flex justify-content-between">
-                    <span>⭐ 我的訂閱</span>
-                    <span id="sub-count" class="badge bg-secondary">0</span>
-                </div>
-                <div class="card-body">
-                    <div id="sub-list" class="d-flex flex-wrap gap-2"></div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-lg-6">
-            <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span>🤖 AI 語意與情感分析結果</span>
-                </div>
-                <div class="card-body p-0" style="min-height: 400px; max-height: 700px; overflow-y: auto;">
-                    <div id="ai-results-area" class="p-3">
-                        <div class="text-center mt-5" style="color: var(--text-muted)">
-                            <h5>等待指令中</h5>
-                            <p>輸入關鍵字，AI 將為您判斷文章重點與群眾情緒。</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-lg-3">
-            <div class="card">
-                <div class="card-header">📈 歷史聲量趨勢 (7天)</div>
-                <div class="card-body p-1">
-                    <div id="trendChart" style="height: 250px; width: 100%;"></div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-header">☁️ 全站即時熱門關鍵字</div>
-                <div class="card-body p-1">
-                    <div id="wordcloud" style="height: 250px; width: 100%;"></div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-header">🔥 今日首頁熱文</div>
-                <div class="card-body p-0">
-                    <div class="list-group list-group-flush" id="hot-list" style="height: 300px; overflow-y: auto;">
-                        <div class="text-center p-3 text-muted small">載入中...</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script>
-    // ⚠️ 關鍵防呆：改用相對路徑，徹底解決網址輸入錯誤的問題
-    const API_BASE = '/api';
-    
-    let userId = 'Guest';
-    let wordChart = null;
-    let trendChartEchart = null;
-
-    // --- 主題切換 (Dark Mode) ---
-    function toggleTheme() {
-        const body = document.body;
-        if (body.getAttribute('data-theme') === 'dark') {
-            body.removeAttribute('data-theme');
-            document.getElementById('theme-btn').innerText = '🌙 深色模式';
-        } else {
-            body.setAttribute('data-theme', 'dark');
-            document.getElementById('theme-btn').innerText = '☀️ 淺色模式';
-        }
-    }
-
-    function initUser() {
-        userId = localStorage.getItem('ptt_user_id') || 'Guest';
-        document.getElementById('user-id-display').innerText = userId;
-    }
-
-    function trySwitchUser() {
-        const newName = prompt("請輸入您的使用者名稱：", userId);
-        if (newName && newName.trim() !== '') {
-            userId = newName.trim();
-            localStorage.setItem('ptt_user_id', userId);
-            document.getElementById('user-id-display').innerText = userId;
-            loadSubscriptions();
-            alert(`👋 歡迎，${userId}！`);
-        }
-    }
-
-    async function loadRecommendations() {
-        const list = document.getElementById('recommendation-list');
-        if (userId === 'Guest') return list.innerHTML = '<div class="text-center p-3 small text-muted">請先登入</div>';
-        
-        try {
-            const res = await fetch(`${API_BASE}/recommendations?user_id=${encodeURIComponent(userId)}`);
-            const recs = await res.json();
-            if (recs && recs.length > 0) {
-                let html = '<div class="list-group list-group-flush">';
-                recs.forEach(item => {
-                    html += `<a href="${item.url}" target="_blank" class="list-group-item p-2 border-0 border-bottom">
-                                <div class="fw-bold" style="font-size: 0.9rem;">${item.title}</div>
-                                <small class="text-info">${item.reason}</small>
-                             </a>`;
-                });
-                list.innerHTML = html + '</div>';
-            } else {
-                list.innerHTML = '<div class="text-center p-3 small text-muted">目前無推薦，請訂閱關鍵字</div>';
-            }
-        } catch (e) { list.innerHTML = '<div class="text-center p-3 small text-danger">推薦系統連線失敗</div>'; }
-    }
-
-    async function loadSubscriptions() {
-        try {
-            const res = await fetch(`${API_BASE}/subscriptions?user_id=${encodeURIComponent(userId)}`);
-            const subs = await res.json();
-            const container = document.getElementById('sub-list');
-            document.getElementById('sub-count').innerText = subs.length;
-            
-            if (subs.length === 0) {
-                container.innerHTML = '<small class="text-muted">尚無訂閱</small>';
-            } else {
-                container.innerHTML = '';
-                subs.forEach(sub => {
-                    container.innerHTML += `<span class="badge bg-secondary sub-tag p-2 fs-6 mb-1">
-                        <span onclick="triggerSearch('${sub.keyword}')">${sub.keyword}</span>
-                        <span class="ms-2 text-white-50" onclick="deleteSubscription(${sub.id})">&times;</span>
-                    </span>`;
-                });
-            }
-            loadRecommendations();
-        } catch (e) {}
-    }
-
-    async function addSubscription() {
-        const keyword = document.getElementById('subscribe-input').value.trim();
-        if (!keyword) return;
-        await fetch(`${API_BASE}/subscriptions`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: userId, keyword: keyword }) });
-        loadSubscriptions();
-    }
-    
-    async function deleteSubscription(id) {
-        await fetch(`${API_BASE}/subscriptions`, { method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: userId, id: id }) });
-        loadSubscriptions();
-    }
-
-    function triggerSearch(keyword) {
-        document.getElementById('subscribe-input').value = keyword;
-        checkSubscription();
-    }
-
-    async function drawTrendChart(keyword) {
-        trendChartEchart.showLoading();
-        try {
-            const res = await fetch(`${API_BASE}/trend?keyword=${encodeURIComponent(keyword)}`);
-            const data = await res.json();
-            trendChartEchart.hideLoading();
-            trendChartEchart.setOption({
-                title: {show: false},
-                tooltip: { trigger: 'axis' },
-                grid: { top: 30, right: 20, bottom: 30, left: 40 },
-                xAxis: { type: 'category', data: data.dates, axisLabel: { color: 'gray' } },
-                yAxis: { type: 'value', axisLabel: { color: 'gray' } },
-                series: [{
-                    data: data.volumes, type: 'line', smooth: true,
-                    lineStyle: { color: '#3498db', width: 3 },
-                    areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{offset: 0, color: 'rgba(52,152,219,0.5)'}, {offset: 1, color: 'rgba(52,152,219,0)'}]) }
-                }]
-            });
-        } catch(e) { trendChartEchart.hideLoading(); }
-    }
-
-    async function checkSubscription() {
-        const keyword = document.getElementById('subscribe-input').value;
-        const resultArea = document.getElementById('ai-results-area');
-        const btn = document.getElementById('ai-btn');
-        if (!keyword) return alert("請輸入關鍵字");
-
-        btn.disabled = true; btn.innerText = '🧠 深度運算中...';
-        resultArea.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary"></div><p class="mt-3">AI 正在閱讀文章並分析群眾情感...</p></div>';
-
-        drawTrendChart(keyword);
-
-        try {
-            const res = await fetch(`${API_BASE}/smart_subscribe`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: userId, keywords: keyword }) });
-            const data = await res.json();
-            
-if (data.matches && data.matches.length > 0) {
-            
-            // 🌍 升級一：繪製最上方的「總體風向球」板塊
-            let macroColor = data.macro_score >= 65 ? '#2ecc71' : (data.macro_score <= 35 ? '#e74c3c' : '#f1c40f');
-            let macroEmoji = data.macro_score >= 65 ? '🔥 樂觀熱烈' : (data.macro_score <= 35 ? '❄️ 悲觀/炎上' : '☁️ 觀望中立');
-            
-            let html = `
-            <div class="card mb-4 shadow-sm" style="border-left: 5px solid ${macroColor};">
-                <div class="card-body bg-light">
-                    <h5 class="fw-bold" style="color: ${macroColor};">
-                        🌍 總體情緒溫度：${data.macro_score} 分 (${macroEmoji})
-                    </h5>
-                    <p class="card-text mb-0 mt-2">
-                        <strong>📊 鄉民共識摘要：</strong>「${data.macro_summary}」
-                    </p>
-                </div>
-            </div>
-            <div class="list-group list-group-flush">`;
-
-            // 開始繪製單篇文章列表
-data.matches.forEach(item => {
-                // 🌟 分別設定發文者與留言區的溫度與顏色
-                let aTemp = item.author_temp;
-                let cTemp = item.comment_temp;
-                let aColor = aTemp >= 65 ? '#2ecc71' : (aTemp <= 35 ? '#e74c3c' : '#f1c40f');
-                let cColor = cTemp >= 65 ? '#2ecc71' : (cTemp <= 35 ? '#e74c3c' : '#f1c40f');
+        <!-- 左側：個人化導覽與推薦 -->
+        <aside class="lg:col-span-3 flex flex-col gap-6">
+            <div class="bg-light-card dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-light-border dark:border-dark-border">
+                <h1 class="text-2xl font-bold mb-2 flex items-center gap-2 text-blue-600 dark:text-cyan-400">
+                    <i class="fa-solid fa-chart-pie"></i> PTT 輿情助理
+                </h1>
+                <p class="text-sm text-light-muted dark:text-dark-muted mb-4">即時 AI 語意分析與個人化推薦</p>
                 
-                let stance = item.stance || '一般討論';
-                let sarcasmBadge = item.is_sarcasm ? '<span class="badge bg-danger ms-2 shadow-sm">⚠️ 疑似反串</span>' : '';
+                <div class="flex items-center justify-between mt-6 pt-4 border-t border-light-border dark:border-dark-border">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-user-circle text-2xl text-gray-400"></i>
+                        <span id="current-user" class="font-semibold">Guest</span>
+                    </div>
+                    <button onclick="switchUser()" class="text-xs bg-blue-100 text-blue-700 dark:bg-cyan-900/30 dark:text-cyan-400 px-3 py-1 rounded-full hover:bg-blue-200 transition">切換使用者</button>
+                </div>
+            </div>
 
-                html += `
-                    <a href="${item.url}" target="_blank" class="list-group-item list-group-item-action mb-3 rounded border shadow-sm">
-                        <div class="d-flex w-100 justify-content-between mb-2">
-                            <h6 class="fw-bold mb-0 text-truncate" style="max-width: 80%;">${item.title}</h6>
-                            <small class="text-danger fw-bold">${item.score} 推</small>
-                        </div>
+            <div class="bg-light-card dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-light-border dark:border-dark-border flex-grow">
+                <h3 class="font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-star text-yellow-400"></i> 專屬推薦</h3>
+                <div id="recommendations-container" class="flex flex-col gap-3 text-sm">
+                    <div class="text-center py-8 text-light-muted dark:text-dark-muted">
+                        <i class="fa-solid fa-satellite-dish text-3xl mb-2 opacity-50"></i>
+                        <p>載入推薦中...</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
 
-                        <div class="bg-light p-2 rounded mb-3 small border">
-                            <div class="mb-1">
-                                <strong>🎯 主要立場：</strong> <span class="badge bg-primary text-white">${stance}</span>
-                                ${sarcasmBadge}
-                            </div>
-                            <div>
-                                <strong>🗣️ 衝突與論點：</strong> <span class="text-muted">${item.reason}</span>
-                            </div>
-                        </div>
+        <!-- 中間：主要搜尋與 AI 分析區 -->
+        <main class="lg:col-span-6 flex flex-col gap-6">
+            <!-- 搜尋區 -->
+            <div class="bg-light-card dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-light-border dark:border-dark-border relative overflow-hidden">
+                <div class="absolute top-0 right-0 p-4">
+                    <button onclick="toggleDarkMode()" class="text-gray-500 hover:text-yellow-500 transition text-xl">
+                        <i id="theme-icon" class="fa-solid fa-moon"></i>
+                    </button>
+                </div>
+                
+                <h2 class="text-xl font-bold mb-4 flex items-center gap-2"><i class="fa-brands fa-searchengin text-blue-500"></i> AI 深度搜尋</h2>
+                <div class="flex gap-2 mb-4">
+                    <input type="text" id="search-input" placeholder="輸入關鍵字 (如: 台股, 尼克, 蘋果)..." 
+                           class="flex-grow px-4 py-3 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                           onkeypress="if(event.key === 'Enter') performSearch()">
+                    <button onclick="subscribeKeyword()" class="bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400 px-4 py-3 rounded-xl hover:bg-pink-200 transition" title="訂閱此關鍵字">
+                        <i class="fa-solid fa-heart"></i>
+                    </button>
+                </div>
+                <button onclick="performSearch()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-blue-500/30 flex justify-center items-center gap-2">
+                    <i class="fa-solid fa-bolt"></i> 開始深度分析
+                </button>
+            </div>
 
-                        <div class="row text-center mt-2">
-                            <div class="col-6 border-end">
-                                <div class="text-muted small fw-bold mb-1">📝 發文者溫度</div>
-                                <div class="fs-5 fw-bold" style="color: ${aColor};">${aTemp}°C</div>
-                            </div>
-                            <div class="col-6">
-                                <div class="text-muted small fw-bold mb-1">💬 留言區溫度</div>
-                                <div class="fs-5 fw-bold" style="color: ${cColor};">${cTemp}°C</div>
-                            </div>
+            <!-- AI 戰情室 (分析結果) -->
+            <div class="bg-light-card dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-light-border dark:border-dark-border flex-grow min-h-[500px]">
+                <h2 class="text-xl font-bold mb-4 flex items-center gap-2 pb-4 border-b border-light-border dark:border-dark-border">
+                    <i class="fa-solid fa-microchip text-indigo-500"></i> AI 輿情戰情室
+                </h2>
+                
+                <div id="ai-loading" class="hidden flex-col items-center justify-center py-20">
+                    <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500 mb-4"></div>
+                    <p class="text-light-muted dark:text-dark-muted font-medium animate-pulse">Gemini 正在進行高維度語意推理...</p>
+                </div>
+
+                <div id="ai-results" class="hidden flex-col gap-6">
+                    <!-- 總結儀表板 -->
+                    <div class="bg-blue-50 dark:bg-slate-800/50 p-5 rounded-xl border border-blue-100 dark:border-slate-700">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="font-bold text-blue-800 dark:text-blue-300">總體風向球</h3>
+                            <span id="macro-score" class="font-bold text-xl text-blue-600 dark:text-cyan-400"></span>
                         </div>
-                    </a>
-                `;
-            });
-            resultArea.innerHTML = html + '</div>';
-        } else {
-                resultArea.innerHTML = '<div class="text-center p-5">找不到相關討論</div>';
+                        <p id="macro-summary" class="text-gray-700 dark:text-gray-300"></p>
+                    </div>
+
+                    <!-- 文章列表區 -->
+                    <div id="articles-container" class="flex flex-col gap-4"></div>
+                </div>
+
+                <!-- 初始空白狀態 -->
+                <div id="ai-empty" class="flex flex-col items-center justify-center py-20 text-light-muted dark:text-dark-muted">
+                    <i class="fa-solid fa-robot text-5xl mb-4 opacity-30"></i>
+                    <p>等待指令中。請輸入關鍵字，AI 將為您判斷群眾情緒與反串邏輯。</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- 右側：資料視覺化 -->
+        <aside class="lg:col-span-3 flex flex-col gap-6">
+            <!-- 趨勢圖 -->
+            <div class="bg-light-card dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-light-border dark:border-dark-border">
+                <h3 class="font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-chart-line text-green-500"></i> 歷史聲量趨勢 (7天)</h3>
+                <div id="trend-chart" class="w-full h-[250px]"></div>
+            </div>
+
+            <!-- 文字雲 -->
+            <div class="bg-light-card dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-light-border dark:border-dark-border flex-grow">
+                <h3 class="font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-cloud text-blue-400"></i> 全站即時熱門關鍵字</h3>
+                <div id="wordcloud-container" class="flex flex-wrap gap-2 justify-center items-center h-[250px] overflow-hidden content-center">
+                    <div class="animate-pulse text-sm text-gray-400">抓取熱門文章中...</div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        let currentUser = localStorage.getItem('pttUser') || 'Guest';
+        let trendChart = null;
+
+        // ====== 🌟 核心徽章轉換邏輯 (Tier Mapping) ======
+        function getTierBadge(temp) {
+            // 確保數值在 0-100
+            temp = Math.max(0, Math.min(100, temp));
+            
+            if (temp >= 80) {
+                return { label: '夯 🔥', classes: 'bg-red-600 text-white border-red-800' };
+            } else if (temp >= 60) {
+                return { label: '頂級 👑', classes: 'bg-orange-500 text-white border-orange-700' };
+            } else if (temp >= 40) {
+                return { label: '人上人 🧍', classes: 'bg-yellow-500 text-black border-yellow-600' };
+            } else if (temp >= 20) {
+                return { label: 'NPC 🤖', classes: 'bg-gray-400 text-white border-gray-600' };
+            } else {
+                return { label: '拉玩了 👎', classes: 'bg-slate-800 text-red-400 border-slate-900' };
             }
-        } catch (e) {
-            resultArea.innerHTML = `<div class="alert alert-danger">連線錯誤，請檢查後端</div>`;
-        } finally {
-            btn.disabled = false; btn.innerText = '開始深度分析';
-        }
-    }
-
-    async function init() {
-        console.log("🚀 網頁初始化啟動...");
-        
-        // 檢查圖表套件是否載入成功
-        if (typeof echarts === 'undefined') {
-            document.getElementById('hot-list').innerHTML = '<div class="text-center p-3 text-danger fw-bold">錯誤：無法載入圖表套件<br>請檢查網路，或關閉擋廣告軟體 (AdBlock) 後重新整理。</div>';
-            return;
         }
 
-        initUser();
-        wordChart = echarts.init(document.getElementById('wordcloud'));
-        trendChartEchart = echarts.init(document.getElementById('trendChart'));
-        trendChartEchart.setOption({ title: { text: '請搜尋關鍵字', textStyle: {color: 'gray', fontSize: 14}, left: 'center', top: 'center' }});
-        
-        try {
-            document.getElementById('hot-list').innerHTML = '<div class="text-center p-4 text-primary"><div class="spinner-border spinner-border-sm"></div> <br>正與 PTT 伺服器連線中<br>(初次載入約需 10~20 秒)...</div>';
+        // 溫度計顏色
+        function getTempColor(temp) {
+            if (temp >= 70) return 'bg-red-500';
+            if (temp >= 40) return 'bg-yellow-500';
+            return 'bg-blue-500';
+        }
+
+        // 初始化
+        window.onload = () => {
+            document.getElementById('current-user').innerText = currentUser;
+            initChart();
+            loadHotTopics();
+            loadRecommendations();
             
-            // 呼叫相對路徑 API
-            const res = await fetch(`${API_BASE}/hot_topics`);
-            const data = await res.json();
+            // 根據系統偏好設定深淺色
+            if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                document.documentElement.classList.add('dark');
+                document.getElementById('theme-icon').classList.replace('fa-moon', 'fa-sun');
+            }
+        };
+
+        function toggleDarkMode() {
+            document.documentElement.classList.toggle('dark');
+            const icon = document.getElementById('theme-icon');
+            if (document.documentElement.classList.contains('dark')) {
+                icon.classList.replace('fa-moon', 'fa-sun');
+            } else {
+                icon.classList.replace('fa-sun', 'fa-moon');
+            }
+            if(trendChart) trendChart.resize(); // 重新繪製圖表以適應顏色
+        }
+
+        function switchUser() {
+            const user = prompt("請輸入您的使用者名稱 (輸入相同名稱可載入歷史紀錄)：", currentUser);
+            if (user && user.trim() !== '') {
+                currentUser = user.trim();
+                localStorage.setItem('pttUser', currentUser);
+                document.getElementById('current-user').innerText = currentUser;
+                loadRecommendations();
+            }
+        }
+
+        // 繪製 ECharts 趨勢圖
+        function initChart() {
+            trendChart = echarts.init(document.getElementById('trend-chart'));
+            // 預設空白圖表
+            renderChart(['1','2','3','4','5','6','7'], [0,0,0,0,0,0,0]);
+            window.addEventListener('resize', () => trendChart.resize());
+        }
+
+        function renderChart(dates, volumes) {
+            const isDark = document.documentElement.classList.contains('dark');
+            const textColor = isDark ? '#cbd5e1' : '#64748b';
             
-            if (data.error) throw new Error(data.error);
-            
-            const colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6'];
-            wordChart.setOption({
+            const option = {
+                tooltip: { trigger: 'axis' },
+                grid: { top: 10, right: 10, bottom: 20, left: 30 },
+                xAxis: { 
+                    type: 'category', 
+                    data: dates,
+                    axisLabel: { color: textColor }
+                },
+                yAxis: { 
+                    type: 'value',
+                    axisLabel: { color: textColor },
+                    splitLine: { lineStyle: { color: isDark ? '#334155' : '#e2e8f0' } }
+                },
                 series: [{
-                    type: 'wordCloud', sizeRange: [12, 50], rotationRange: [0, 0], shape: 'circle',
-                    textStyle: { fontWeight: 'bold', color: () => colors[Math.floor(Math.random() * colors.length)] },
-                    data: data.keywords.map(k => ({name: k[0], value: k[1]}))
+                    data: volumes,
+                    type: 'line',
+                    smooth: true,
+                    itemStyle: { color: '#0ea5e9' },
+                    areaStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: 'rgba(14, 165, 233, 0.5)' },
+                            { offset: 1, color: 'rgba(14, 165, 233, 0.0)' }
+                        ])
+                    }
                 }]
-            });
-            
-            const list = document.getElementById('hot-list');
-            list.innerHTML = '';
-            data.articles.slice(0, 20).forEach(a => {
-                list.innerHTML += `
-                    <a href="${a.url}" target="_blank" class="list-group-item list-group-item-action p-2">
-                        <div class="d-flex w-100 justify-content-between mb-1">
-                            <span class="badge bg-secondary" style="font-size: 0.7rem;">${a.board}</span>
-                            <small class="text-danger fw-bold">${a.score} 推</small>
-                        </div>
-                        <div class="mb-0 text-truncate fw-bold" style="font-size: 0.9rem;" title="${a.title}">${a.title}</div>
-                    </a>`;
-            });
-
-            loadSubscriptions();
-            document.getElementById('status-badge').className = 'badge bg-success rounded-pill px-3 py-2'; 
-            document.getElementById('status-badge').innerText = '系統連線正常';
-
-        } catch (e) { 
-            console.error("❌ 系統初始化失敗:", e);
-            document.getElementById('status-badge').className = 'badge bg-danger rounded-pill px-3 py-2'; 
-            document.getElementById('status-badge').innerText = '連線異常'; 
-            document.getElementById('hot-list').innerHTML = `<div class="text-center p-3 text-danger small">載入失敗：<br>${e.message}<br>請確認後端 Python 伺服器已啟動。</div>`;
-            wordChart.setOption({ title: { text: '無法載入文字雲', textStyle: {color: 'red', fontSize: 14}, left: 'center', top: 'center' }});
+            };
+            trendChart.setOption(option);
         }
-    }
 
-    // 啟動！
-    init();
-    window.addEventListener('resize', () => { if(wordChart) wordChart.resize(); if(trendChartEchart) trendChartEchart.resize(); });
-</script>
+        async function loadHotTopics() {
+            try {
+                const res = await fetch('/api/hot_topics');
+                const data = await res.json();
+                if(data.keywords) {
+                    const container = document.getElementById('wordcloud-container');
+                    container.innerHTML = '';
+                    const colors = ['#ef4444', '#f97316', '#10b981', '#0ea5e9', '#8b5cf6', '#ec4899'];
+                    
+                    data.keywords.forEach(kw => {
+                        const word = kw[0];
+                        const size = kw[1]; // 後端已做 math.log 處理
+                        const span = document.createElement('span');
+                        span.textContent = word;
+                        span.style.fontSize = `${Math.max(12, size)}px`;
+                        span.style.color = colors[Math.floor(Math.random() * colors.length)];
+                        span.style.fontWeight = size > 20 ? 'bold' : 'normal';
+                        span.className = 'cursor-pointer hover:scale-110 transition-transform';
+                        span.onclick = () => {
+                            document.getElementById('search-input').value = word;
+                            performSearch();
+                        };
+                        container.appendChild(span);
+                    });
+                }
+            } catch (e) {
+                console.error("載入熱門關鍵字失敗", e);
+            }
+        }
+
+        async function loadRecommendations() {
+            const container = document.getElementById('recommendations-container');
+            container.innerHTML = '<div class="text-center py-4 text-gray-500"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+            
+            try {
+                const res = await fetch(`/api/recommendations?user_id=${currentUser}`);
+                const data = await res.json();
+                
+                if(!data || data.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-4">尚無推薦。請先搜尋或訂閱關鍵字！</p>';
+                    return;
+                }
+                
+                container.innerHTML = data.map(item => `
+                    <a href="${item.url}" target="_blank" class="block p-3 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-gray-100 dark:border-slate-700 transition">
+                        <div class="text-xs font-bold text-blue-500 mb-1">${item.reason}</div>
+                        <div class="font-medium text-gray-800 dark:text-gray-200 line-clamp-2">${item.title}</div>
+                        <div class="text-xs text-gray-400 mt-2"><i class="fa-solid fa-fire text-red-400"></i> 熱度: ${item.score}</div>
+                    </a>
+                `).join('');
+            } catch (e) {
+                container.innerHTML = '<p class="text-red-500 text-center py-4">推薦系統載入失敗</p>';
+            }
+        }
+
+        async function subscribeKeyword() {
+            const keyword = document.getElementById('search-input').value.trim();
+            if (!keyword) return alert("請先輸入關鍵字");
+            
+            try {
+                const res = await fetch('/api/subscriptions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: currentUser, keyword: keyword })
+                });
+                const result = await res.json();
+                alert(result.message);
+                loadRecommendations();
+            } catch (e) {
+                alert("訂閱失敗");
+            }
+        }
+
+        async function performSearch() {
+            const keyword = document.getElementById('search-input').value.trim();
+            if (!keyword) return;
+
+            // UI 狀態切換
+            document.getElementById('ai-empty').classList.add('hidden');
+            document.getElementById('ai-results').classList.add('hidden');
+            document.getElementById('ai-loading').classList.remove('hidden');
+            document.getElementById('ai-loading').classList.add('flex');
+            
+            // 更新趨勢圖
+            fetchTrend(keyword);
+
+            try {
+                const res = await fetch('/api/smart_subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: currentUser, keyword: keyword })
+                });
+                
+                const data = await res.json();
+                
+                document.getElementById('ai-loading').classList.add('hidden');
+                document.getElementById('ai-loading').classList.remove('flex');
+                
+                // 處理 429 錯誤或自訂錯誤
+                if (!res.ok) {
+                    document.getElementById('ai-empty').classList.remove('hidden');
+                    document.getElementById('ai-empty').innerHTML = `<i class="fa-solid fa-triangle-exclamation text-5xl mb-4 text-red-500"></i><p class="text-red-500 font-bold">${data.error || '分析發生錯誤'}</p>`;
+                    return;
+                }
+
+                if (data.message) {
+                    document.getElementById('ai-empty').classList.remove('hidden');
+                    document.getElementById('ai-empty').innerHTML = `<i class="fa-solid fa-ghost text-5xl mb-4 opacity-50"></i><p>${data.message}</p>`;
+                    return;
+                }
+
+                // 渲染結果
+                document.getElementById('ai-results').classList.remove('hidden');
+                document.getElementById('ai-results').classList.add('flex');
+                
+                const macroScore = data.macro_score || 50;
+                document.getElementById('macro-score').innerHTML = `${macroScore}°C <span class="text-sm px-2 py-1 rounded-full ${getTierBadge(macroScore).classes} ml-2">${getTierBadge(macroScore).label}</span>`;
+                document.getElementById('macro-summary').innerText = data.macro_summary || "目前無明顯共識";
+
+                const container = document.getElementById('articles-container');
+                container.innerHTML = data.matches.map(article => {
+                    // 取得發文與留言的徽章資訊
+                    const authorBadge = getTierBadge(article.author_temp);
+                    const commentBadge = getTierBadge(article.comment_temp);
+                    
+                    return `
+                    <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-gray-100 dark:border-slate-700 shadow-sm">
+                        <div class="flex justify-between items-start mb-3">
+                            <a href="${article.url}" target="_blank" class="font-bold text-lg text-blue-700 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 transition line-clamp-2 pr-4">
+                                [${article.board}] ${article.title}
+                            </a>
+                            ${article.is_sarcasm ? `<span class="bg-red-100 text-red-700 border border-red-200 text-xs px-2 py-1 rounded font-bold whitespace-nowrap flex items-center gap-1"><i class="fa-solid fa-triangle-exclamation"></i> 疑似反串</span>` : ''}
+                        </div>
+                        
+                        <div class="mb-4 text-gray-700 dark:text-gray-300 text-sm bg-gray-50 dark:bg-slate-900/50 p-3 rounded-lg border border-gray-100 dark:border-slate-700">
+                            <span class="font-bold text-indigo-500">AI 觀點：</span> ${article.reason}
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900 rounded-lg p-3">
+                            <!-- 發文者溫度與徽章 -->
+                            <div>
+                                <div class="flex justify-between items-center text-xs font-bold mb-1 text-gray-600 dark:text-gray-400">
+                                    <span>✍️ 發文者溫度</span>
+                                    <div class="flex items-center gap-2">
+                                        <span>${article.author_temp}°C</span>
+                                        <span class="px-2 py-0.5 rounded text-[10px] border ${authorBadge.classes}">${authorBadge.label}</span>
+                                    </div>
+                                </div>
+                                <div class="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+                                    <div class="${getTempColor(article.author_temp)} h-2 rounded-full progress-bar-fill" style="width: ${article.author_temp}%"></div>
+                                </div>
+                            </div>
+                            
+                            <!-- 留言區溫度與徽章 -->
+                            <div>
+                                <div class="flex justify-between items-center text-xs font-bold mb-1 text-gray-600 dark:text-gray-400">
+                                    <span>💬 留言區溫度</span>
+                                    <div class="flex items-center gap-2">
+                                        <span>${article.comment_temp}°C</span>
+                                        <span class="px-2 py-0.5 rounded text-[10px] border ${commentBadge.classes}">${commentBadge.label}</span>
+                                    </div>
+                                </div>
+                                <div class="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+                                    <div class="${getTempColor(article.comment_temp)} h-2 rounded-full progress-bar-fill" style="width: ${article.comment_temp}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `}).join('');
+                
+                // 搜尋成功後，重新載入推薦歷史
+                loadRecommendations();
+
+            } catch (e) {
+                console.error(e);
+                document.getElementById('ai-loading').classList.add('hidden');
+                document.getElementById('ai-empty').classList.remove('hidden');
+                document.getElementById('ai-empty').innerHTML = `<p class="text-red-500">連線失敗，請檢查網路狀態。</p>`;
+            }
+        }
+
+        async function fetchTrend(keyword) {
+            try {
+                const res = await fetch(`/api/trend?keyword=${encodeURIComponent(keyword)}`);
+                const data = await res.json();
+                renderChart(data.dates, data.volumes);
+            } catch (e) {
+                console.error("趨勢圖載入失敗");
+            }
+        }
+    </script>
 </body>
 </html>

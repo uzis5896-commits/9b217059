@@ -140,7 +140,8 @@
             <!-- 🎉 補回的：今日首頁熱文 -->
             <div class="bg-light-card dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-light-border dark:border-dark-border flex-grow">
                 <h3 class="font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-fire text-red-500"></i> 今日首頁熱文</h3>
-                <div id="hot-articles-container" class="flex flex-col gap-3">
+                <!-- 🌟 加上 max-h-[400px] 與 overflow-y-auto 讓長列表可以優雅滾動 -->
+                <div id="hot-articles-container" class="flex flex-col gap-3 max-h-[400px] overflow-y-auto pr-2">
                     <div class="animate-pulse text-sm text-gray-400 text-center py-4">載入文章列表中...</div>
                 </div>
             </div>
@@ -263,8 +264,8 @@
                 // 2. 🎉 渲染今日首頁熱文 (補回的功能)
                 const articlesContainer = document.getElementById('hot-articles-container');
                 if (data.articles && data.articles.length > 0) {
-                    // 只取前 6 篇，確保版面美觀不超長
-                    articlesContainer.innerHTML = data.articles.slice(0, 6).map(article => `
+                    // 🌟 修改：將 slice(0, 6) 改為 slice(0, 15)，顯示 15 篇熱門文章
+                    articlesContainer.innerHTML = data.articles.slice(0, 15).map(article => `
                         <a href="${article.url}" target="_blank" class="flex flex-col gap-1.5 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-transparent hover:border-gray-200 dark:hover:border-slate-600 transition group shadow-sm">
                             <div class="flex justify-between items-center">
                                 <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-gray-300">${article.board}</span>

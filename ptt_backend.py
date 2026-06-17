@@ -9,15 +9,13 @@ from flask_sqlalchemy import SQLAlchemy
 import re
 from collections import Counter
 from datetime import datetime, timedelta
-import warnings
 import math
 import jieba
-import time
 import random
 import google.generativeai as genai
-from urllib.parse import quote
 import os
 import traceback
+import concurrent.futures # 🚀 導入多執行緒庫
 
 app = Flask(__name__)
 CORS(app)
@@ -27,7 +25,7 @@ CORS(app)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # ==========================================
 
-# --- 資料庫智慧切換（本機用 SQLite，雲端用 PostgreSQL） ---
+# --- 資料庫智慧切換 ---
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 if DATABASE_URL:
@@ -85,8 +83,9 @@ CACHE_DURATION = 180
 
 def get_robust_session():
     session = requests.Session()
+    # 🚀 將連接池 (pool_connections) 加大，因為我們要用多執行緒同時發送請求
     retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
-    adapter = HTTPAdapter(max_retries=retry)
+    adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=retry)
     session.mount('http://', adapter); session.mount('https://', adapter)
     session.cookies.update({'over18': '1'})
     return session
@@ -157,27 +156,29 @@ def get_hot_topics():
         session = get_robust_session()
         all_articles = []
         
-        for board in TARGET_BOARDS:
-            try:
-                url = f"https://www.ptt.cc/bbs/{board}/index.html"
-                response = session.get(url, headers=HEADERS, timeout=5, verify=False)
-                
-                if response.status_code != 200:
-                    continue
-                    
-                soup = BeautifulSoup(response.text, 'html.parser')
-                for r_ent in soup.find_all('div', class_='r-ent'):
-                    t_tag = r_ent.select_one('.title a')
-                    p_tag = r_ent.select_one('.nrec span')
-                    
-                    if t_tag and not t_tag.text.strip().startswith('[公告]'):
-                        s_str = p_tag.text.strip() if p_tag else '0'
-                        sc = 100 if s_str == '爆' else (int(s_str) if s_str.isdigit() else 0)
-                        if sc >= 5: 
-                            all_articles.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'hot'))
-                            
-            except Exception as e:
-                continue
+        # 🚀 這裡也順手加上多執行緒，讓首頁文字雲載入變飛快
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            def fetch_board(board):
+                try:
+                    url = f"https://www.ptt.cc/bbs/{board}/index.html"
+                    response = session.get(url, headers=HEADERS, timeout=5, verify=False)
+                    if response.status_code != 200: return []
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    res = []
+                    for r_ent in soup.find_all('div', class_='r-ent'):
+                        t_tag = r_ent.select_one('.title a')
+                        p_tag = r_ent.select_one('.nrec span')
+                        if t_tag and not t_tag.text.strip().startswith('[公告]'):
+                            s_str = p_tag.text.strip() if p_tag else '0'
+                            sc = 100 if s_str == '爆' else (int(s_str) if s_str.isdigit() else 0)
+                            if sc >= 5: 
+                                res.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'hot'))
+                    return res
+                except: return []
+
+            futures = [executor.submit(fetch_board, b) for b in TARGET_BOARDS]
+            for future in concurrent.futures.as_completed(futures):
+                all_articles.extend(future.result())
 
         all_articles.sort(key=lambda x: x.score, reverse=True)
         
@@ -238,19 +239,33 @@ def smart_subscribe():
 
         session = get_robust_session()
         all_results = []
-        for board in TARGET_BOARDS: 
-            all_results.extend(search_board_keyword(session, board, keyword))
+        
+        # 🚀 優化 1：使用多執行緒「同時」搜尋 9 個看板
+        with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
+            futures = [executor.submit(search_board_keyword, session, board, keyword) for board in TARGET_BOARDS]
+            for future in concurrent.futures.as_completed(futures):
+                all_results.extend(future.result())
             
         if not all_results: 
             return jsonify({'message': '找不到相關討論'})
 
         all_results.sort(key=lambda x: x.score, reverse=True)
-        top_15 = all_results[:10]
+        top_10 = all_results[:10] # 只取前 10 篇交給 AI 讀，維持速度與精準度
         
-        articles_text = ""
-        for i, a in enumerate(top_15):
+        # 🚀 優化 2：使用多執行緒「同時」抓取這 10 篇文章的內文
+        articles_text_blocks = [""] * len(top_10) # 預留空間確保順序正確
+        
+        def fetch_and_format(index, a):
             summary = scrape_article_content(session, a.url)[:100].replace('\n', ' ')
-            articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
+            return index, f"ID: {index}\n標題: {a.title}\n摘要: {summary}\n\n"
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(fetch_and_format, i, a) for i, a in enumerate(top_10)]
+            for future in concurrent.futures.as_completed(futures):
+                idx, formatted_text = future.result()
+                articles_text_blocks[idx] = formatted_text
+                
+        articles_text = "".join(articles_text_blocks)
 
         prompt = f"""
         你是一個精通 PTT 文化的輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
@@ -271,9 +286,9 @@ def smart_subscribe():
               "id": 文章ID,
               "author_temp": 數字 (0-100，發文者溫度),
               "comment_temp": 數字 (0-100，留言區溫度),
-              "tier_badge": "夯 / 頂級 / 人上人 / NPC / 拉玩了 (請依據留言區的溫度，給予一個對應的階級稱號)",
+              "tier_badge": "夯 / 頂級 / 人上人 / NPC / 拉玩了",
               "reason": "綜合評估發文與留言，濃縮核心論點與衝突點",
-              "is_sarcasm": 布林值 (是否有反串)
+              "is_sarcasm": 布林值
             }}
           ]
         }}
@@ -302,13 +317,13 @@ def smart_subscribe():
                 'reason': m.get('reason', '相關討論'), 
                 'author_temp': m.get('author_temp', 50),
                 'comment_temp': m.get('comment_temp', 50),
-                'stance': m.get('stance', '一般討論'),
+                'stance': m.get('tier_badge', '一般討論'),
                 'is_sarcasm': m.get('is_sarcasm', False)
             } for m in matches
         }
         
         final_results = []
-        for i, a in enumerate(top_15):
+        for i, a in enumerate(top_10):
             final_results.append({
                 'board': a.board, 
                 'title': a.title, 
@@ -317,7 +332,7 @@ def smart_subscribe():
                 'reason': match_dict.get(i, {}).get('reason', '相關討論'),
                 'author_temp': match_dict.get(i, {}).get('author_temp', 50),
                 'comment_temp': match_dict.get(i, {}).get('comment_temp', 50),
-                'stance': match_dict.get(i, {}).get('stance', '一般討論'),
+                'stance': match_dict.get(i, {}).get('stance', '人上人'),
                 'is_sarcasm': match_dict.get(i, {}).get('is_sarcasm', False)
             })
 
@@ -327,48 +342,44 @@ def smart_subscribe():
             'matches': final_results
         })
     except Exception as e:
-        print(f"❌ AI 分析發生嚴重錯誤: {str(e)}", flush=True)
+        error_msg = str(e)
+        print(f"❌ AI 分析發生嚴重錯誤: {error_msg}", flush=True)
         traceback.print_exc()
+        
+        # 🛡️ 攔截 429 錯誤，給前端溫柔的提示
+        if "429" in error_msg or "quota" in error_msg.lower():
+            return jsonify({"error": "⚠️ AI 系統正在冷卻中 (免費版 API 限制)，請等待 1 分鐘後再試！"}), 429
+            
         return jsonify({"error": "內部伺服器錯誤"}), 500
 
-# ✨ [升級 1: 歷史聲量趨勢] 無懈可擊狀態感知版！
 @app.route('/api/trend', methods=['GET'])
 def get_trend():
     keyword = request.args.get('keyword', '未知名')
     dates = [(datetime.now() - timedelta(days=i)).strftime('%m/%d') for i in range(6, -1, -1)]
     
-    # 判斷是否為今日熱門關鍵字 (從快取的文字雲資料中比對)
     is_hot_today = False
     if CACHE_DATA.get('payload') and CACHE_DATA['payload'].get('keywords'):
-        # 取出所有文字雲裡的熱門字
         hot_words = [item[0].lower() for item in CACHE_DATA['payload']['keywords']]
         search_kw = keyword.lower()
-        # 只要搜尋的字有在熱門字裡面，或是熱門字包含搜尋的字，就判定為「今日熱門」
         if any(search_kw in w or w in search_kw for w in hot_words):
             is_hot_today = True
 
-    # 利用關鍵字長度當亂數種子，讓同一個字每次查出來長一樣
     random.seed(len(keyword) + sum(ord(c) for c in keyword)) 
+    base_volume = random.randint(30, 120)
     
     volumes = []
-    if is_hot_today:
-        # 🔥 熱門字：基數高，且最後一天保證暴漲
-        base_volume = random.randint(50, 150)
-        for i in range(7):
-            if i == 6:
-                vol = base_volume + random.randint(80, 200) # 今天暴漲
-            elif i >= 4:
-                vol = base_volume + random.randint(20, 80)  # 前幾天醖釀
-            else:
-                vol = base_volume + random.randint(-20, 30) # 更早之前平緩
-            volumes.append(max(0, int(vol)))
-    else:
-        # ❄️ 冷門字：基數超低，且趨勢平緩貼地
-        base_volume = random.randint(0, 15)
-        for i in range(7):
-            vol = base_volume + random.randint(-5, 5) # 每天只有零星幾篇
-            volumes.append(max(0, int(vol)))
+    for i in range(7):
+        if i == 6 and is_hot_today:
+            vol = base_volume + random.randint(80, 200) 
+        elif i == 6 and not is_hot_today:
+            vol = base_volume + random.randint(-5, 5)
+        elif i >= 4:
+            vol = base_volume + random.randint(20, 80) if is_hot_today else base_volume + random.randint(-5, 5)
+        else:
+            vol = base_volume + random.randint(-20, 30) if is_hot_today else base_volume + random.randint(-5, 5)
             
+        volumes.append(max(0, int(vol)))
+        
     return jsonify({'dates': dates, 'volumes': volumes})
 
 @app.route('/api/subscriptions', methods=['GET', 'POST', 'DELETE'])
@@ -436,8 +447,11 @@ def get_recommendations():
             fallback_boards = ['Gossiping', 'Stock', 'Tech_Job', 'NBA']
             extra_results = []
             
-            for board in fallback_boards:
-                extra_results.extend(search_board_keyword(session, board, top_keyword))
+            # 🚀 優化 3：連被動推薦的 Fallback 搜尋也改成多執行緒！
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [executor.submit(search_board_keyword, session, board, top_keyword) for board in fallback_boards]
+                for future in concurrent.futures.as_completed(futures):
+                    extra_results.extend(future.result())
             
             extra_results.sort(key=lambda x: x.score, reverse=True)
             

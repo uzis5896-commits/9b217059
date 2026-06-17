@@ -250,25 +250,24 @@ def smart_subscribe():
             return jsonify({'message': '找不到相關討論'})
 
         all_results.sort(key=lambda x: x.score, reverse=True)
-        # 🚀 極速優化 1：將原本的 10 篇縮減為 5 篇，大幅減少 AI 閱讀與「生成字數」的時間
-        top_5 = all_results[:5] 
+        # 回復至上一版：保留 10 篇文章的完整分析，維持分析深度
+        top_10 = all_results[:10] 
         
-        articles_text_blocks = [""] * len(top_5) 
+        articles_text_blocks = [""] * len(top_10) 
         
         def fetch_and_format(index, a):
             summary = scrape_article_content(session, a.url)[:100].replace('\n', ' ')
             return index, f"ID: {index}\n標題: {a.title}\n摘要: {summary}\n\n"
 
-        # 🚀 極速優化 2：改用 5 個執行緒對應 5 篇文章
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(fetch_and_format, i, a) for i, a in enumerate(top_5)]
+        # 使用 10 個執行緒並行加速 10 篇文章的內容爬取
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(fetch_and_format, i, a) for i, a in enumerate(top_10)]
             for future in concurrent.futures.as_completed(futures):
                 idx, formatted_text = future.result()
                 articles_text_blocks[idx] = formatted_text
                 
         articles_text = "".join(articles_text_blocks)
 
-        # 🚀 極速優化 3：在 Prompt 中嚴格限制字數，字數越少，AI 處理速度呈指數級提升！
         prompt = f"""
         你是一個精通 PTT 文化的輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
         請閱讀以下 PTT 文章摘要，我們的情感溫度量表 (0-100) 對應了五個 PTT 專屬階級：
@@ -280,18 +279,16 @@ def smart_subscribe():
         - 0~19分: 「拉玩了」
 
         請嚴格遵守以下 JSON 結構輸出。
-        ⚠️ 為了追求極速分析，所有 reason 欄位請務必「極度簡短，限制在 15 個字以內」！
-        
         {{
           "macro_score": 數字 (0-100),
-          "macro_summary": "10字以內總結風向",
+          "macro_summary": "用 PTT 口吻總結風向",
           "articles": [
             {{
               "id": 文章ID,
               "author_temp": 數字 (0-100),
               "comment_temp": 數字 (0-100),
               "tier_badge": "請給出階級稱號",
-              "reason": "15字以內濃縮精華",
+              "reason": "綜合評估發文與留言，濃縮核心論點與衝突點",
               "is_sarcasm": 布林值
             }}
           ]
@@ -303,11 +300,8 @@ def smart_subscribe():
         
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # 🚀 極速優化 4：強制限制 API 的最大輸出 Token (避免 AI 廢話太多拖慢速度)
-        response = model.generate_content(
-            prompt,
-            generation_config={"max_output_tokens": 500} 
-        )
+        # 回復正常生成，不限制短 token，讓 AI 能輸出完整推論理由
+        response = model.generate_content(prompt)
         
         try: 
             json_str = response.text.replace('```json', '').replace('```', '').strip()
@@ -332,8 +326,8 @@ def smart_subscribe():
         }
         
         final_results = []
-        # 配合上面的變更，這裡改成迴圈跑 top_5
-        for i, a in enumerate(top_5):
+        # 回復：針對 10 篇文章產生結果列表
+        for i, a in enumerate(top_10):
             final_results.append({
                 'board': a.board, 
                 'title': a.title, 

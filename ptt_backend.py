@@ -113,7 +113,7 @@ def scrape_article_content(session, url):
     except: return ""
 
 def search_board_keyword(session, board, keyword):
-    search_url = f"https://www.ptt.cc/bbs/{board}/search?q={keyword}"
+    search_url = f"[https://www.ptt.cc/bbs/](https://www.ptt.cc/bbs/){board}/search?q={keyword}"
     headers = {'User-Agent': 'Mozilla/5.0'}
     cookies = {'over18': '1'}
     articles = [] 
@@ -129,7 +129,7 @@ def search_board_keyword(session, board, keyword):
             if t_tag and t_tag.get('href'):
                 s_str = p_tag.text.strip() if p_tag else '0'
                 sc = 100 if s_str == '爆' else (int(s_str) if s_str.isdigit() else 0)
-                articles.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'normal'))
+                articles.append(Article(board, t_tag.text.strip(), "[https://www.ptt.cc](https://www.ptt.cc)"+t_tag['href'], sc, 'normal'))
     except Exception: 
         pass
     return articles
@@ -152,7 +152,7 @@ def get_hot_topics():
         # 🚀 這裡使用多執行緒加速首頁抓取
         with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
             future_to_board = {
-                executor.submit(session.get, f"https://www.ptt.cc/bbs/{board}/index.html", headers=HEADERS, timeout=5, verify=False): board 
+                executor.submit(session.get, f"[https://www.ptt.cc/bbs/](https://www.ptt.cc/bbs/){board}/index.html", headers=HEADERS, timeout=5, verify=False): board 
                 for board in TARGET_BOARDS
             }
             
@@ -169,7 +169,7 @@ def get_hot_topics():
                                 s_str = p_tag.text.strip() if p_tag else '0'
                                 sc = 100 if s_str == '爆' else (int(s_str) if s_str.isdigit() else 0)
                                 if sc >= 5: 
-                                    all_articles.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'hot'))
+                                    all_articles.append(Article(board, t_tag.text.strip(), "[https://www.ptt.cc](https://www.ptt.cc)"+t_tag['href'], sc, 'hot'))
                 except Exception:
                     continue
 
@@ -242,7 +242,7 @@ def smart_subscribe():
             summary = articles_text_dict.get(i, "")
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
 
-        # 🔥 PTT 階級映射 Prompt (雙溫度計 + 階級標籤)
+        # 🔥 PTT 階級映射 Prompt
         prompt = f"""
         你是一個精通 PTT 文化的輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
         請閱讀以下 PTT 文章摘要，我們的情感溫度量表 (0-100) 對應了五個 PTT 專屬階級：
@@ -259,16 +259,12 @@ def smart_subscribe():
         {articles_text}
         """
         
-        # 🧠 [核心修復]：放寬 Token 限制並強制回傳合法 JSON 格式
+        # 🧠 [核心相容性修復]：拿掉 response_mime_type，確保相容所有伺服器與套件版本
         generation_config = genai.types.GenerationConfig(
-            temperature=0.2,       # 讓模型回答更果斷，減少廢話
-            max_output_tokens=2000, # 🚀 放寬上限，避免生成的 JSON 被從中切斷
-            response_mime_type="application/json" # 🌟 神級參數：強制底層只吐出合法的 JSON
+            temperature=0.2,       
+            max_output_tokens=2000 
         )
         
-        # 因為啟用了 response_mime_type="application/json"，我們改將 Schema 直接放在 API 層級
-        # 或者直接讓他在 Prompt 中理解 (較為彈性)
-        # 為了保證絕對不壞，我們再次在 Prompt 補上 Schema 宣告
         schema_prompt = prompt + """
         請嚴格遵守以下 JSON 結構輸出：
         {
@@ -290,14 +286,27 @@ def smart_subscribe():
         response = model.generate_content(schema_prompt, generation_config=generation_config)
         
         try: 
+            # 🛡️ 嚴格洗除 Markdown 標記，保障 JSON 解析絕對成功
             json_str = response.text.strip()
-            ai_data = json.loads(json_str)
+            if json_str.startswith("```json"):
+                json_str = json_str[7:]
+            elif json_str.startswith("```"):
+                json_str = json_str[3:]
+            if json_str.endswith("```"):
+                json_str = json_str[:-3]
+            
+            ai_data = json.loads(json_str.strip())
             matches = ai_data.get('articles', [])
             macro_score = ai_data.get('macro_score', 50)
             macro_summary = ai_data.get('macro_summary', '目前無明顯共識')
         except Exception as e: 
             print(f"⚠️ JSON 解析失敗: {e}", flush=True)
-            print(f"🔍 故障的字串內容: {response.text}", flush=True) # 將錯誤內容印出方便日後除錯
+            # 🛡️ 避免 response.text 因安全審查導致 ValueError 二次當機
+            try:
+                print(f"🔍 故障內容: {response.text}", flush=True)
+            except Exception:
+                print(f"🔍 無法讀取內容 (可能觸發 AI 安全審查機制)", flush=True)
+                
             matches = []
             macro_score = 50
             macro_summary = "無法產生總結"
@@ -338,7 +347,9 @@ def smart_subscribe():
         # 🛡️ 429 防護網機制
         if "429" in error_msg or "quota" in error_msg.lower():
             return jsonify({"error": "⚠️ AI 系統正在冷卻中 (避免機器人濫用機制)，請等待 1 分鐘後再試！"}), 429
-        return jsonify({"error": "內部伺服器錯誤"}), 500
+            
+        # 🌟 將詳細的錯誤訊息傳回前端，避免只有空洞的 "內部伺服器錯誤"
+        return jsonify({"error": f"內部伺服器錯誤: {error_msg}"}), 500
 
 @app.route('/api/trend', methods=['GET'])
 def get_trend():

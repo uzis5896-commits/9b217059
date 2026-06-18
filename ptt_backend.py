@@ -15,8 +15,8 @@ import random
 import google.generativeai as genai
 import os
 import traceback
-import concurrent.futures # 🚀 導入多執行緒模組
-import time # 🚀 導入時間模組，用於重試機制
+import concurrent.futures
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -26,19 +26,16 @@ CORS(app)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # ==========================================
 
-# --- 資料庫智慧切換（本機用 SQLite，雲端用 PostgreSQL） ---
 DATABASE_URL = os.environ.get('DATABASE_URL')
-
 if DATABASE_URL:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
-    print("🌐 偵測到雲端生產環境：已成功連接雲端 PostgreSQL 資料庫！")
+    print("🌐 已連接雲端 PostgreSQL 資料庫")
 else:
     basedir = os.path.abspath(os.path.dirname(__file__))
-    db_path = os.path.join(basedir, 'ptt_data.db')
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + db_path
-    print(f"🏠 偵測到本地開發環境：繼續使用本地 SQLite 資料庫 ({db_path})")
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'ptt_data.db')
+    print("🏠 使用本地 SQLite 資料庫")
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -67,18 +64,8 @@ except Exception as e:
     model = None
 
 HEADERS = {'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html', 'Connection': 'keep-alive'}
-TARGET_BOARDS = [
-    'Gossiping', 'Stock', 'MobileComm', 'C_Chat', 'Baseball', 
-    'NBA', 'Tech_Job', 'Car', 'Lifeismoney'
-]
-STOP_WORDS = {
-    '的', '是', '在', '我', '你', '他', '我們', '你們', '他們',
-    '問卦', '公告', '新聞', '情報', '問題', '討論', '分享', '心得', '請益', '閒聊', 're', '發錢', '爆卦', '協尋',
-    '有沒有', '怎麼', '什麼', '為什麼', '如果', '可以', '覺得', '不會', '一樣', '知道',
-    '這', '那', '就', '了', '也', '不', '嗎', '啊', '呢', '吧', '都', '還', '又', '跟', '被', '讓', '把', '與', '及',
-    '一個', '現在', '今天', '台灣', '真的', '大家', '還是', '只是', '所以', '因為', '但是', '花邊',
-    '集中', '置底', '盤後', '盤後閒', '一般', '整理', '贈送', '申訴', '集點', '代碼', 'schedule', 'fw', 'vs', '標題', '系列', '連結', '相關', '資訊', '品牌', '公開', '全台', '查詢'
-}
+TARGET_BOARDS = ['Gossiping', 'Stock', 'MobileComm', 'C_Chat', 'Baseball', 'NBA', 'Tech_Job', 'Car', 'Lifeismoney']
+STOP_WORDS = {'的', '是', '在', '我', '你', '他', '我們', '你們', '他們', '問卦', '公告', '新聞', '情報', '問題', '討論', '分享', '心得', '請益', '閒聊', 're', '發錢', '爆卦', '協尋', '有沒有', '怎麼', '什麼', '為什麼', '如果', '可以', '覺得', '不會', '一樣', '知道', '這', '那', '就', '了', '也', '不', '嗎', '啊', '呢', '吧', '都', '還', '又', '跟', '被', '讓', '把', '與', '及', '一個', '現在', '今天', '台灣', '真的', '大家', '還是', '只是', '所以', '因為', '但是', '花邊', '集中', '置底', '盤後', '盤後閒', '一般', '整理', '贈送', '申訴', '集點', '代碼', 'schedule', 'fw', 'vs', '標題', '系列', '連結', '相關', '資訊', '品牌', '公開', '全台', '查詢'}
 CACHE_DATA = {'timestamp': None, 'payload': None}
 CACHE_DURATION = 180 
 
@@ -118,11 +105,9 @@ def search_board_keyword(session, board, keyword):
     headers = {'User-Agent': 'Mozilla/5.0'}
     cookies = {'over18': '1'}
     articles = [] 
-    
     try:
         response = session.get(search_url, headers=headers, cookies=cookies, timeout=10)
         if response.status_code != 200: return []
-            
         soup = BeautifulSoup(response.text, 'html.parser')
         for r_ent in soup.find_all('div', class_='r-ent'):
             t_tag = r_ent.select_one('.title a')
@@ -131,8 +116,7 @@ def search_board_keyword(session, board, keyword):
                 s_str = p_tag.text.strip() if p_tag else '0'
                 sc = 100 if s_str == '爆' else (int(s_str) if s_str.isdigit() else 0)
                 articles.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'normal'))
-    except Exception: 
-        pass
+    except Exception: pass
     return articles
 
 @app.route('/')
@@ -149,13 +133,8 @@ def get_hot_topics():
     try:
         session = get_robust_session()
         all_articles = []
-        
         with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
-            future_to_board = {
-                executor.submit(session.get, f"https://www.ptt.cc/bbs/{board}/index.html", headers=HEADERS, timeout=5, verify=False): board 
-                for board in TARGET_BOARDS
-            }
-            
+            future_to_board = {executor.submit(session.get, f"https://www.ptt.cc/bbs/{board}/index.html", headers=HEADERS, timeout=5, verify=False): board for board in TARGET_BOARDS}
             for future in concurrent.futures.as_completed(future_to_board):
                 board = future_to_board[future]
                 try:
@@ -170,14 +149,12 @@ def get_hot_topics():
                                 sc = 100 if s_str == '爆' else (int(s_str) if s_str.isdigit() else 0)
                                 if sc >= 5: 
                                     all_articles.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'hot'))
-                except Exception:
-                    continue
+                except Exception: continue
 
         all_articles.sort(key=lambda x: x.score, reverse=True)
         MAX_PER_BOARD = 5  
         board_counts = {board: 0 for board in TARGET_BOARDS}
         balanced_top = []
-        
         for article in all_articles:
             if board_counts[article.board] < MAX_PER_BOARD:
                 balanced_top.append(article)
@@ -196,7 +173,6 @@ def get_hot_topics():
         }
         CACHE_DATA = {'timestamp': now, 'payload': payload}
         return jsonify(payload)
-        
     except Exception as e: 
         return jsonify({'error': str(e)}), 500
 
@@ -249,7 +225,7 @@ def smart_subscribe():
         - 20~39分: 「NPC」 (邊緣議題，微弱負面/無感)
         - 0~19分: 「拉玩了」 (被噓爆、徹底翻車、極度負面)
 
-        請給出精確的 0-100 之間整數溫度，並嚴格遵守以下 JSON 結構輸出（不要包含 Markdown 等標記，內部文字請避免使用雙引號以免破壞 JSON 格式）：
+        請給出精確的 0-100 之間整數溫度，並嚴格遵守以下 JSON 結構輸出（不要包含 Markdown 等標記，內部文字避免使用雙引號）：
         {{
           "macro_score": 數字,
           "macro_summary": "用一句話總結目前整體的鄉民共識與風向",
@@ -272,8 +248,6 @@ def smart_subscribe():
         ai_data = {}
         try:
             generation_config = genai.types.GenerationConfig(temperature=0.2)
-            
-            # 🛡️ 解除 Gemini 的道德與安全審查，允許分析 PTT 毒性文本
             safety_settings = {
                 "HARM_CATEGORY_HARASSMENT": "BLOCK_NONE",
                 "HARM_CATEGORY_HATE_SPEECH": "BLOCK_NONE",
@@ -286,22 +260,13 @@ def smart_subscribe():
             
             for attempt in range(3):
                 try:
-                    # 加入 safety_settings 強制不擋 PTT 髒話
-                    response = model.generate_content(
-                        prompt, 
-                        generation_config=generation_config,
-                        safety_settings=safety_settings
-                    )
-                    
-                    # 如果被安全機制攔截，response.text 會拋出 ValueError
+                    response = model.generate_content(prompt, generation_config=generation_config, safety_settings=safety_settings)
                     raw_text = response.text.strip()
                     break
                 except Exception as api_e:
-                    print(f"⚠️ Gemini API 發生錯誤或安全攔截 (嘗試 {attempt+1}/3): {api_e}", flush=True)
-                    if attempt == 2:
-                        raise api_e
+                    print(f"⚠️ API錯誤 (嘗試 {attempt+1}/3): {api_e}", flush=True)
+                    if attempt == 2: raise api_e
                     time.sleep(1.5)
 
-            # 多重過濾 Markdown 格式 (已修復之前截斷的問題)
             if raw_text.startswith("```"):
                 raw_text = re.sub(r'^

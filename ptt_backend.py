@@ -273,7 +273,7 @@ def smart_subscribe():
         try:
             generation_config = genai.types.GenerationConfig(temperature=0.2)
             
-            # 🛡️ [史詩級修復]：解除 Gemini 的道德與安全審查，允許分析 PTT 毒性文本
+            # 🛡️ 解除 Gemini 的道德與安全審查，允許分析 PTT 毒性文本
             safety_settings = {
                 "HARM_CATEGORY_HARASSMENT": "BLOCK_NONE",
                 "HARM_CATEGORY_HATE_SPEECH": "BLOCK_NONE",
@@ -282,6 +282,7 @@ def smart_subscribe():
             }
             
             response = None
+            raw_text = ""
             
             for attempt in range(3):
                 try:
@@ -301,6 +302,6 @@ def smart_subscribe():
                         raise api_e
                     time.sleep(1.5)
 
-            # 多重過濾 Markdown 格式
+            # 多重過濾 Markdown 格式 (已修復之前截斷的問題)
             if raw_text.startswith("```"):
                 raw_text = re.sub(r'^

@@ -113,7 +113,6 @@ def scrape_article_content(session, url):
     except: return ""
 
 def search_board_keyword(session, board, keyword):
-    # 🐛 修正此處的網址格式，移除了多餘的 Markdown 語法
     search_url = f"https://www.ptt.cc/bbs/{board}/search?q={keyword}"
     headers = {'User-Agent': 'Mozilla/5.0'}
     cookies = {'over18': '1'}
@@ -130,7 +129,6 @@ def search_board_keyword(session, board, keyword):
             if t_tag and t_tag.get('href'):
                 s_str = p_tag.text.strip() if p_tag else '0'
                 sc = 100 if s_str == '爆' else (int(s_str) if s_str.isdigit() else 0)
-                # 🐛 修正此處的網址格式
                 articles.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'normal'))
     except Exception: 
         pass
@@ -151,9 +149,7 @@ def get_hot_topics():
         session = get_robust_session()
         all_articles = []
         
-        # 🚀 這裡使用多執行緒加速首頁抓取
         with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
-            # 🐛 修正此處的網址格式
             future_to_board = {
                 executor.submit(session.get, f"https://www.ptt.cc/bbs/{board}/index.html", headers=HEADERS, timeout=5, verify=False): board 
                 for board in TARGET_BOARDS
@@ -172,7 +168,6 @@ def get_hot_topics():
                                 s_str = p_tag.text.strip() if p_tag else '0'
                                 sc = 100 if s_str == '爆' else (int(s_str) if s_str.isdigit() else 0)
                                 if sc >= 5: 
-                                    # 🐛 修正此處的網址格式
                                     all_articles.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'hot'))
                 except Exception:
                     continue
@@ -221,7 +216,6 @@ def smart_subscribe():
         session = get_robust_session()
         all_results = []
         
-        # 🚀 [效能優化 1]：多執行緒平行搜尋 9 大看板
         with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
             future_to_search = {executor.submit(search_board_keyword, session, board, keyword): board for board in TARGET_BOARDS}
             for future in concurrent.futures.as_completed(future_to_search):
@@ -230,10 +224,8 @@ def smart_subscribe():
         if not all_results: return jsonify({'message': '找不到相關討論'})
 
         all_results.sort(key=lambda x: x.score, reverse=True)
-        # 📉 [效能優化 2]：縮減為 Top 5，提升 AI 推論速度
         top_articles = all_results[:5] 
         
-        # 🚀 [效能優化 3]：多執行緒平行抓取文章內文
         articles_text_dict = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_to_url = {executor.submit(scrape_article_content, session, a.url): i for i, a in enumerate(top_articles)}
@@ -246,7 +238,6 @@ def smart_subscribe():
             summary = articles_text_dict.get(i, "")
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
 
-        # 🔥 PTT 階級映射 Prompt
         prompt = f"""
         你是一個精通 PTT 文化的輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
         請閱讀以下 PTT 文章摘要，我們的情感溫度量表 (0-100) 對應了五個 PTT 專屬階級：
@@ -258,30 +249,30 @@ def smart_subscribe():
         - 0~19分: 「拉玩了」 (被噓爆、徹底翻車、極度負面)
 
         請依據上述定義給出精確的 0-100 之間整數溫度。
-
+        
         文章列表:
         {articles_text}
         """
         
-        # 🧠 [核心相容性修復]：拿掉 response_mime_type，確保相容所有伺服器與套件版本
         generation_config = genai.types.GenerationConfig(
             temperature=0.2,       
             max_output_tokens=2000 
         )
         
+        # 🧠 [核心防呆修復]：給予絕對標準的 JSON 範例，防止 AI 亂輸出字串
         schema_prompt = prompt + """
-        請嚴格遵守以下 JSON 結構輸出：
+        請絕對嚴格遵守以下 JSON 格式輸出（不要包含任何 Markdown 標記，不要有任何前後廢話）。這是一個格式範例：
         {
-          "macro_score": 數字,
-          "macro_summary": "用一句話總結目前整體的鄉民共識與風向",
+          "macro_score": 75,
+          "macro_summary": "鄉民普遍看好，認為這是重要利多",
           "articles": [
             {
-              "id": 文章ID,
-              "author_temp": 數字,
-              "comment_temp": 數字,
-              "tier_badge": "夯 / 頂級 / 人上人 / NPC / 拉玩了 (請依據留言區溫度決定)",
-              "reason": "綜合評估發文與留言，濃縮核心論點與衝突點",
-              "is_sarcasm": 布林值 (是否有反串)
+              "id": 0,
+              "author_temp": 80,
+              "comment_temp": 70,
+              "tier_badge": "頂級",
+              "reason": "發文者提出數據佐證，留言區多數認同並加碼討論",
+              "is_sarcasm": false
             }
           ]
         }
@@ -290,26 +281,24 @@ def smart_subscribe():
         response = model.generate_content(schema_prompt, generation_config=generation_config)
         
         try: 
-            # 🛡️ 嚴格洗除 Markdown 標記，保障 JSON 解析絕對成功
-            json_str = response.text.strip()
-            if json_str.startswith("```json"):
-                json_str = json_str[7:]
-            elif json_str.startswith("```"):
-                json_str = json_str[3:]
-            if json_str.endswith("```"):
-                json_str = json_str[:-3]
+            raw_text = response.text
+            # 🛡️ [史詩級防護]：使用正則表達式，暴力挖出 {} 裡面的 JSON，無視 AI 所有廢話
+            match = re.search(r'\{[\s\S]*\}', raw_text)
+            if not match:
+                raise ValueError("AI 回傳的內容中找不到 JSON 結構")
+                
+            json_str = match.group(0)
+            ai_data = json.loads(json_str)
             
-            ai_data = json.loads(json_str.strip())
             matches = ai_data.get('articles', [])
             macro_score = ai_data.get('macro_score', 50)
             macro_summary = ai_data.get('macro_summary', '目前無明顯共識')
         except Exception as e: 
             print(f"⚠️ JSON 解析失敗: {e}", flush=True)
-            # 🛡️ 避免 response.text 因安全審查導致 ValueError 二次當機
             try:
                 print(f"🔍 故障內容: {response.text}", flush=True)
             except Exception:
-                print(f"🔍 無法讀取內容 (可能觸發 AI 安全審查機制)", flush=True)
+                pass
                 
             matches = []
             macro_score = 50
@@ -348,11 +337,9 @@ def smart_subscribe():
         error_msg = str(e)
         print(f"❌ AI 分析發生嚴重錯誤: {error_msg}", flush=True)
         traceback.print_exc()
-        # 🛡️ 429 防護網機制
         if "429" in error_msg or "quota" in error_msg.lower():
             return jsonify({"error": "⚠️ AI 系統正在冷卻中 (避免機器人濫用機制)，請等待 1 分鐘後再試！"}), 429
             
-        # 🌟 將詳細的錯誤訊息傳回前端，避免只有空洞的 "內部伺服器錯誤"
         return jsonify({"error": f"內部伺服器錯誤: {error_msg}"}), 500
 
 @app.route('/api/trend', methods=['GET'])

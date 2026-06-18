@@ -113,7 +113,8 @@ def scrape_article_content(session, url):
     except: return ""
 
 def search_board_keyword(session, board, keyword):
-    search_url = f"[https://www.ptt.cc/bbs/](https://www.ptt.cc/bbs/){board}/search?q={keyword}"
+    # 🐛 修正此處的網址格式，移除了多餘的 Markdown 語法
+    search_url = f"https://www.ptt.cc/bbs/{board}/search?q={keyword}"
     headers = {'User-Agent': 'Mozilla/5.0'}
     cookies = {'over18': '1'}
     articles = [] 
@@ -129,7 +130,8 @@ def search_board_keyword(session, board, keyword):
             if t_tag and t_tag.get('href'):
                 s_str = p_tag.text.strip() if p_tag else '0'
                 sc = 100 if s_str == '爆' else (int(s_str) if s_str.isdigit() else 0)
-                articles.append(Article(board, t_tag.text.strip(), "[https://www.ptt.cc](https://www.ptt.cc)"+t_tag['href'], sc, 'normal'))
+                # 🐛 修正此處的網址格式
+                articles.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'normal'))
     except Exception: 
         pass
     return articles
@@ -151,8 +153,9 @@ def get_hot_topics():
         
         # 🚀 這裡使用多執行緒加速首頁抓取
         with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
+            # 🐛 修正此處的網址格式
             future_to_board = {
-                executor.submit(session.get, f"[https://www.ptt.cc/bbs/](https://www.ptt.cc/bbs/){board}/index.html", headers=HEADERS, timeout=5, verify=False): board 
+                executor.submit(session.get, f"https://www.ptt.cc/bbs/{board}/index.html", headers=HEADERS, timeout=5, verify=False): board 
                 for board in TARGET_BOARDS
             }
             
@@ -169,7 +172,8 @@ def get_hot_topics():
                                 s_str = p_tag.text.strip() if p_tag else '0'
                                 sc = 100 if s_str == '爆' else (int(s_str) if s_str.isdigit() else 0)
                                 if sc >= 5: 
-                                    all_articles.append(Article(board, t_tag.text.strip(), "[https://www.ptt.cc](https://www.ptt.cc)"+t_tag['href'], sc, 'hot'))
+                                    # 🐛 修正此處的網址格式
+                                    all_articles.append(Article(board, t_tag.text.strip(), "https://www.ptt.cc"+t_tag['href'], sc, 'hot'))
                 except Exception:
                     continue
 

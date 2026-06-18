@@ -16,6 +16,7 @@ import google.generativeai as genai
 import os
 import traceback
 import concurrent.futures # 🚀 導入多執行緒模組
+import time # 🚀 導入時間模組，用於重試機制
 
 app = Flask(__name__)
 CORS(app)
@@ -96,7 +97,7 @@ class Article:
 
 def scrape_article_content(session, url):
     try:
-        res = session.get(url, headers=HEADERS, timeout=5, verify=False)
+        res = session.get(url, headers=HEADERS, timeout=3, verify=False)
         if res.status_code != 200: return ""
         soup = BeautifulSoup(res.text, 'html.parser')
         main_content = soup.find(id="main-content")
@@ -224,7 +225,6 @@ def smart_subscribe():
         if not all_results: return jsonify({'message': '找不到相關討論'})
 
         all_results.sort(key=lambda x: x.score, reverse=True)
-        # 🔄 穩定版：恢復為擷取 10 篇文章
         top_articles = all_results[:10] 
         
         articles_text_dict = {}
@@ -239,28 +239,23 @@ def smart_subscribe():
             summary = articles_text_dict.get(i, "")
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
 
-        # 🔄 穩定版 Prompt：包含階級定義，並明確指示 JSON 格式
         prompt = f"""
-        你是一個精通 PTT 文化的輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
-        請閱讀以下 PTT 文章摘要，我們的情感溫度量表 (0-100) 對應了五個 PTT 專屬階級：
+        你是一個精通 PTT 文化的輿情分析師。使用者搜尋了：「{keyword}」。
+        為了追求效能，請以精簡的文字進行分析。總結盡量控制在15字內，理由控制在20字內。
         
-        - 80~100分: 「夯」 (全網爆紅，極度狂熱/支持)
-        - 60~79分: 「頂級」 (討論熱烈，高度肯定/看好)
-        - 40~59分: 「人上人」 (客觀情報，熱度穩定/中立)
-        - 20~39分: 「NPC」 (邊緣議題，微弱負面/無感)
-        - 0~19分: 「拉玩了」 (被噓爆、徹底翻車、極度負面)
+        階級定義：80~100(夯), 60~79(頂級), 40~59(人上人), 20~39(NPC), 0~19(拉玩了)。
 
-        請給出精確的 0-100 之間整數溫度，並嚴格遵守以下 JSON 結構輸出（不要包含其他廢話）：
+        請給出精確的 0-100 之間整數溫度，並嚴格遵守以下 JSON 結構輸出（不要包含 Markdown 等標記）：
         {{
           "macro_score": 數字,
-          "macro_summary": "用一句話總結目前整體的鄉民共識與風向",
+          "macro_summary": "極短總結",
           "articles": [
             {{
               "id": 文章ID,
               "author_temp": 數字,
               "comment_temp": 數字,
               "tier_badge": "夯 或 頂級 或 人上人 或 NPC 或 拉玩了",
-              "reason": "綜合評估發文與留言，濃縮核心論點",
+              "reason": "極短評",
               "is_sarcasm": 布林值
             }}
           ]
@@ -270,32 +265,43 @@ def smart_subscribe():
         {articles_text}
         """
         
-        # 🔄 穩定版配置：解除 max_output_tokens 限制，讓 AI 完整生成 10 篇文章的 JSON
-        generation_config = genai.types.GenerationConfig(
-            temperature=0.2
-        )
-
-        response = model.generate_content(prompt, generation_config=generation_config)
-        
-        try: 
-            # 🔄 穩定版清洗：使用最穩定的字串擷取法
-            raw_text = response.text.strip()
-            if "```json" in raw_text:
-                raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in raw_text:
-                raw_text = raw_text.split("```")[1].split("```")[0].strip()
-                
-            ai_data = json.loads(raw_text)
+        # 🛡️ 實作 API 自動重試機制與優雅降級
+        ai_data = {}
+        try:
+            generation_config = genai.types.GenerationConfig(temperature=0.2)
+            response = None
             
-            matches = ai_data.get('articles', [])
-            macro_score = ai_data.get('macro_score', 50)
-            macro_summary = ai_data.get('macro_summary', '目前無明顯共識')
+            # 迴圈最多嘗試 3 次，如果遇到 500 錯誤就等 1.5 秒再試
+            for attempt in range(3):
+                try:
+                    response = model.generate_content(prompt, generation_config=generation_config)
+                    break
+                except Exception as api_e:
+                    print(f"⚠️ Gemini API 發生錯誤 (嘗試 {attempt+1}/3): {api_e}", flush=True)
+                    if attempt == 2:
+                        raise api_e # 第三次還是失敗，才把錯誤往外丟
+                    time.sleep(1.5)
+
+            raw_text = response.text.strip()
+            match = re.search(r'\{[\s\S]*\}', raw_text)
+            if not match:
+                raise ValueError("無法擷取 JSON 結構")
+                
+            json_str = match.group(0)
+            ai_data = json.loads(json_str)
+
         except Exception as e: 
-            print(f"⚠️ JSON 解析失敗: {e}", flush=True)
-            print(f"🔍 故障內容: {response.text}", flush=True)
-            matches = []
-            macro_score = 50
-            macro_summary = "無法產生總結"
+            print(f"⚠️ AI 處理全線失敗，啟用優雅降級模式: {e}", flush=True)
+            # 🛡️ [防崩潰核心] 即使 AI 伺服器徹底當機，系統也只會給予預設值，保證網頁 200 OK 絕對不當機
+            ai_data = {
+                "macro_score": 50,
+                "macro_summary": "⚠️ AI 伺服器暫時無回應，僅顯示即時熱門文章",
+                "articles": []
+            }
+
+        matches = ai_data.get('articles', [])
+        macro_score = ai_data.get('macro_score', 50)
+        macro_summary = ai_data.get('macro_summary', '目前無明顯共識')
 
         match_dict = {
             m.get('id'): {
@@ -328,11 +334,8 @@ def smart_subscribe():
         })
     except Exception as e:
         error_msg = str(e)
-        print(f"❌ AI 分析發生嚴重錯誤: {error_msg}", flush=True)
+        print(f"❌ 後端系統發生嚴重錯誤: {error_msg}", flush=True)
         traceback.print_exc()
-        if "429" in error_msg or "quota" in error_msg.lower():
-            return jsonify({"error": "⚠️ AI 系統正在冷卻中 (避免機器人濫用機制)，請等待 1 分鐘後再試！"}), 429
-            
         return jsonify({"error": f"內部伺服器錯誤: {error_msg}"}), 500
 
 @app.route('/api/trend', methods=['GET'])

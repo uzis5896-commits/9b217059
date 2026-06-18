@@ -217,6 +217,7 @@ def smart_subscribe():
         session = get_robust_session()
         all_results = []
         
+        # 依舊平行搜尋所有看板 (速度與只搜一個一樣快，且保證不漏接熱文)
         with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
             future_to_search = {executor.submit(search_board_keyword, session, board, keyword): board for board in TARGET_BOARDS}
             for future in concurrent.futures.as_completed(future_to_search):
@@ -225,10 +226,11 @@ def smart_subscribe():
         if not all_results: return jsonify({'message': '找不到相關討論'})
 
         all_results.sort(key=lambda x: x.score, reverse=True)
-        top_articles = all_results[:10] 
+        # 📉 [效能與品質的完美平衡]：改為取 Top 5 篇文章，自然減少 AI 生成時間
+        top_articles = all_results[:5] 
         
         articles_text_dict = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_to_url = {executor.submit(scrape_article_content, session, a.url): i for i, a in enumerate(top_articles)}
             for future in concurrent.futures.as_completed(future_to_url):
                 i = future_to_url[future]
@@ -239,23 +241,28 @@ def smart_subscribe():
             summary = articles_text_dict.get(i, "")
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
 
+        # 🔄 回歸最穩定、無限制的 Prompt，讓 AI 能好好解釋原因
         prompt = f"""
-        你是一個精通 PTT 文化的輿情分析師。使用者搜尋了：「{keyword}」。
-        為了追求效能，請以精簡的文字進行分析。總結盡量控制在15字內，理由控制在20字內。
+        你是一個精通 PTT 文化的輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
+        請閱讀以下 PTT 5篇文章摘要，我們的情感溫度量表 (0-100) 對應了五個 PTT 專屬階級：
         
-        階級定義：80~100(夯), 60~79(頂級), 40~59(人上人), 20~39(NPC), 0~19(拉玩了)。
+        - 80~100分: 「夯」 (全網爆紅，極度狂熱/支持)
+        - 60~79分: 「頂級」 (討論熱烈，高度肯定/看好)
+        - 40~59分: 「人上人」 (客觀情報，熱度穩定/中立)
+        - 20~39分: 「NPC」 (邊緣議題，微弱負面/無感)
+        - 0~19分: 「拉玩了」 (被噓爆、徹底翻車、極度負面)
 
         請給出精確的 0-100 之間整數溫度，並嚴格遵守以下 JSON 結構輸出（不要包含 Markdown 等標記）：
         {{
           "macro_score": 數字,
-          "macro_summary": "極短總結",
+          "macro_summary": "用一句話總結目前整體的鄉民共識與風向",
           "articles": [
             {{
               "id": 文章ID,
               "author_temp": 數字,
               "comment_temp": 數字,
               "tier_badge": "夯 或 頂級 或 人上人 或 NPC 或 拉玩了",
-              "reason": "極短評",
+              "reason": "綜合評估發文與留言，濃縮核心論點與衝突點",
               "is_sarcasm": 布林值
             }}
           ]
@@ -271,7 +278,6 @@ def smart_subscribe():
             generation_config = genai.types.GenerationConfig(temperature=0.2)
             response = None
             
-            # 迴圈最多嘗試 3 次，如果遇到 500 錯誤就等 1.5 秒再試
             for attempt in range(3):
                 try:
                     response = model.generate_content(prompt, generation_config=generation_config)
@@ -279,7 +285,7 @@ def smart_subscribe():
                 except Exception as api_e:
                     print(f"⚠️ Gemini API 發生錯誤 (嘗試 {attempt+1}/3): {api_e}", flush=True)
                     if attempt == 2:
-                        raise api_e # 第三次還是失敗，才把錯誤往外丟
+                        raise api_e
                     time.sleep(1.5)
 
             raw_text = response.text.strip()
@@ -292,7 +298,6 @@ def smart_subscribe():
 
         except Exception as e: 
             print(f"⚠️ AI 處理全線失敗，啟用優雅降級模式: {e}", flush=True)
-            # 🛡️ [防崩潰核心] 即使 AI 伺服器徹底當機，系統也只會給予預設值，保證網頁 200 OK 絕對不當機
             ai_data = {
                 "macro_score": 50,
                 "macro_summary": "⚠️ AI 伺服器暫時無回應，僅顯示即時熱門文章",

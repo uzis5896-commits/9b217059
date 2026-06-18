@@ -224,10 +224,11 @@ def smart_subscribe():
         if not all_results: return jsonify({'message': '找不到相關討論'})
 
         all_results.sort(key=lambda x: x.score, reverse=True)
-        top_articles = all_results[:5] 
+        # 🔄 穩定版：恢復為擷取 10 篇文章
+        top_articles = all_results[:10] 
         
         articles_text_dict = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             future_to_url = {executor.submit(scrape_article_content, session, a.url): i for i, a in enumerate(top_articles)}
             for future in concurrent.futures.as_completed(future_to_url):
                 i = future_to_url[future]
@@ -238,6 +239,7 @@ def smart_subscribe():
             summary = articles_text_dict.get(i, "")
             articles_text += f"ID: {i}\n標題: {a.title}\n摘要: {summary}\n\n"
 
+        # 🔄 穩定版 Prompt：包含階級定義，並明確指示 JSON 格式
         prompt = f"""
         你是一個精通 PTT 文化的輿情分析師。使用者搜尋了關鍵字：「{keyword}」。
         請閱讀以下 PTT 文章摘要，我們的情感溫度量表 (0-100) 對應了五個 PTT 專屬階級：
@@ -248,58 +250,49 @@ def smart_subscribe():
         - 20~39分: 「NPC」 (邊緣議題，微弱負面/無感)
         - 0~19分: 「拉玩了」 (被噓爆、徹底翻車、極度負面)
 
-        請依據上述定義給出精確的 0-100 之間整數溫度。
+        請給出精確的 0-100 之間整數溫度，並嚴格遵守以下 JSON 結構輸出（不要包含其他廢話）：
+        {{
+          "macro_score": 數字,
+          "macro_summary": "用一句話總結目前整體的鄉民共識與風向",
+          "articles": [
+            {{
+              "id": 文章ID,
+              "author_temp": 數字,
+              "comment_temp": 數字,
+              "tier_badge": "夯 或 頂級 或 人上人 或 NPC 或 拉玩了",
+              "reason": "綜合評估發文與留言，濃縮核心論點",
+              "is_sarcasm": 布林值
+            }}
+          ]
+        }}
         
         文章列表:
         {articles_text}
         """
         
+        # 🔄 穩定版配置：解除 max_output_tokens 限制，讓 AI 完整生成 10 篇文章的 JSON
         generation_config = genai.types.GenerationConfig(
-            temperature=0.2,       
-            max_output_tokens=2000 
+            temperature=0.2
         )
-        
-        # 🧠 [核心防呆修復]：給予絕對標準的 JSON 範例，防止 AI 亂輸出字串
-        schema_prompt = prompt + """
-        請絕對嚴格遵守以下 JSON 格式輸出（不要包含任何 Markdown 標記，不要有任何前後廢話）。這是一個格式範例：
-        {
-          "macro_score": 75,
-          "macro_summary": "鄉民普遍看好，認為這是重要利多",
-          "articles": [
-            {
-              "id": 0,
-              "author_temp": 80,
-              "comment_temp": 70,
-              "tier_badge": "頂級",
-              "reason": "發文者提出數據佐證，留言區多數認同並加碼討論",
-              "is_sarcasm": false
-            }
-          ]
-        }
-        """
 
-        response = model.generate_content(schema_prompt, generation_config=generation_config)
+        response = model.generate_content(prompt, generation_config=generation_config)
         
         try: 
-            raw_text = response.text
-            # 🛡️ [史詩級防護]：使用正則表達式，暴力挖出 {} 裡面的 JSON，無視 AI 所有廢話
-            match = re.search(r'\{[\s\S]*\}', raw_text)
-            if not match:
-                raise ValueError("AI 回傳的內容中找不到 JSON 結構")
+            # 🔄 穩定版清洗：使用最穩定的字串擷取法
+            raw_text = response.text.strip()
+            if "```json" in raw_text:
+                raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in raw_text:
+                raw_text = raw_text.split("```")[1].split("```")[0].strip()
                 
-            json_str = match.group(0)
-            ai_data = json.loads(json_str)
+            ai_data = json.loads(raw_text)
             
             matches = ai_data.get('articles', [])
             macro_score = ai_data.get('macro_score', 50)
             macro_summary = ai_data.get('macro_summary', '目前無明顯共識')
         except Exception as e: 
             print(f"⚠️ JSON 解析失敗: {e}", flush=True)
-            try:
-                print(f"🔍 故障內容: {response.text}", flush=True)
-            except Exception:
-                pass
-                
+            print(f"🔍 故障內容: {response.text}", flush=True)
             matches = []
             macro_score = 50
             macro_summary = "無法產生總結"

@@ -226,7 +226,7 @@ def smart_subscribe():
         if not all_results: return jsonify({'message': '找不到相關討論'})
 
         all_results.sort(key=lambda x: x.score, reverse=True)
-        # 📉 [效能優化 2]：配合教授要求，縮減為 Top 5，大幅減少 Token 消耗
+        # 📉 [效能優化 2]：縮減為 Top 5，提升 AI 推論速度
         top_articles = all_results[:5] 
         
         # 🚀 [效能優化 3]：多執行緒平行抓取文章內文
@@ -253,42 +253,51 @@ def smart_subscribe():
         - 20~39分: 「NPC」 (邊緣議題，微弱負面/無感)
         - 0~19分: 「拉玩了」 (被噓爆、徹底翻車、極度負面)
 
-        請給出精確的 0-100 之間整數溫度，並嚴格遵守以下 JSON 結構輸出：
-        {{
-          "macro_score": 數字 (0-100，這 5 篇文章整體的加權期望值溫度),
-          "macro_summary": "用一句話總結目前整體的鄉民共識與風向",
-          "articles": [
-            {{
-              "id": 文章ID,
-              "author_temp": 數字 (0-100，發文者溫度),
-              "comment_temp": 數字 (0-100，留言區溫度),
-              "tier_badge": "夯 / 頂級 / 人上人 / NPC / 拉玩了 (請依據留言區溫度，給予對應的階級稱號)",
-              "reason": "綜合評估發文與留言，濃縮核心論點與衝突點",
-              "is_sarcasm": 布林值 (是否有反串)
-            }}
-          ]
-        }}
+        請依據上述定義給出精確的 0-100 之間整數溫度。
 
         文章列表:
         {articles_text}
         """
         
-        # 🧠 [效能優化 4]：API 參數調校 (GenerationConfig) 限制 Token 並降溫
+        # 🧠 [核心修復]：放寬 Token 限制並強制回傳合法 JSON 格式
         generation_config = genai.types.GenerationConfig(
             temperature=0.2,       # 讓模型回答更果斷，減少廢話
-            max_output_tokens=800, # 設定上限，防呆機制
+            max_output_tokens=2000, # 🚀 放寬上限，避免生成的 JSON 被從中切斷
+            response_mime_type="application/json" # 🌟 神級參數：強制底層只吐出合法的 JSON
         )
         
-        response = model.generate_content(prompt, generation_config=generation_config)
+        # 因為啟用了 response_mime_type="application/json"，我們改將 Schema 直接放在 API 層級
+        # 或者直接讓他在 Prompt 中理解 (較為彈性)
+        # 為了保證絕對不壞，我們再次在 Prompt 補上 Schema 宣告
+        schema_prompt = prompt + """
+        請嚴格遵守以下 JSON 結構輸出：
+        {
+          "macro_score": 數字,
+          "macro_summary": "用一句話總結目前整體的鄉民共識與風向",
+          "articles": [
+            {
+              "id": 文章ID,
+              "author_temp": 數字,
+              "comment_temp": 數字,
+              "tier_badge": "夯 / 頂級 / 人上人 / NPC / 拉玩了 (請依據留言區溫度決定)",
+              "reason": "綜合評估發文與留言，濃縮核心論點與衝突點",
+              "is_sarcasm": 布林值 (是否有反串)
+            }
+          ]
+        }
+        """
+
+        response = model.generate_content(schema_prompt, generation_config=generation_config)
         
         try: 
-            json_str = response.text.replace('```json', '').replace('```', '').strip()
+            json_str = response.text.strip()
             ai_data = json.loads(json_str)
             matches = ai_data.get('articles', [])
             macro_score = ai_data.get('macro_score', 50)
             macro_summary = ai_data.get('macro_summary', '目前無明顯共識')
         except Exception as e: 
             print(f"⚠️ JSON 解析失敗: {e}", flush=True)
+            print(f"🔍 故障的字串內容: {response.text}", flush=True) # 將錯誤內容印出方便日後除錯
             matches = []
             macro_score = 50
             macro_summary = "無法產生總結"

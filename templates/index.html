@@ -240,6 +240,19 @@
             trendChart.setOption(option);
         }
 
+        // ====== 🌟 補上遺漏的 fetchTrend 函數 ======
+        async function fetchTrend(keyword) {
+            try {
+                const res = await fetch(`/api/trend?keyword=${encodeURIComponent(keyword)}`);
+                const data = await res.json();
+                if (data.dates && data.volumes) {
+                    renderChart(data.dates, data.volumes);
+                }
+            } catch (e) {
+                console.error("趨勢圖載入失敗", e);
+            }
+        }
+
         async function loadHotTopics() {
             try {
                 const res = await fetch('/api/hot_topics');
@@ -403,6 +416,8 @@
 
             // 啟動炫酷載入畫面
             startDynamicLoading();
+            
+            // 呼叫趨勢圖更新 (已修復：確保函數存在)
             fetchTrend(keyword);
 
             try {

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PTT 輿情分析系統</title>
+    <title>PTT AI 輿情系統</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome -->
@@ -40,7 +40,7 @@
         <aside class="lg:col-span-3 flex flex-col gap-6">
             <div class="bg-light-card dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-light-border dark:border-dark-border">
                 <h1 class="text-2xl font-bold mb-2 flex items-center gap-2 text-blue-600 dark:text-cyan-400">
-                    <i class="fa-solid fa-chart-pie"></i> PTT 輿情分析系統
+                    <i class="fa-solid fa-chart-pie"></i> PTT 輿情系統
                 </h1>
                 <p class="text-sm text-light-muted dark:text-dark-muted mb-4">即時 AI 語意分析與個人化推薦</p>
                 
@@ -76,7 +76,7 @@
                 
                 <h2 class="text-xl font-bold mb-4 flex items-center gap-2"><i class="fa-brands fa-searchengin text-blue-500"></i> AI 深度搜尋</h2>
                 <div class="flex gap-2 mb-4">
-                    <input type="text" id="search-input" placeholder="輸入關鍵字 (如: 台股, 蘋果, 尼克)..." 
+                    <input type="text" id="search-input" placeholder="輸入關鍵字" 
                            class="flex-grow px-4 py-3 rounded-xl bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
                            onkeypress="if(event.key === 'Enter') performSearch()">
                     <button onclick="subscribeKeyword()" class="bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400 px-4 py-3 rounded-xl hover:bg-pink-200 transition" title="訂閱此關鍵字">
@@ -94,9 +94,17 @@
                     <i class="fa-solid fa-microchip text-indigo-500"></i> AI 輿情戰情室
                 </h2>
                 
-                <div id="ai-loading" class="hidden flex-col items-center justify-center py-20">
-                    <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500 mb-4"></div>
-                    <p class="text-light-muted dark:text-dark-muted font-medium animate-pulse">Gemini 正在進行高維度語意推理...</p>
+                <!-- 🌟 進階動態 Loading 介面：擬真進度條與文字切換 -->
+                <div id="ai-loading" class="hidden flex-col items-center justify-center py-16">
+                    <div class="w-full max-w-md bg-gray-200 dark:bg-slate-700 rounded-full h-3 mb-8 overflow-hidden shadow-inner">
+                        <div id="fake-progress-bar" class="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full progress-bar-fill" style="width: 0%;"></div>
+                    </div>
+                    <div class="h-12 flex items-center justify-center">
+                        <p id="loading-status-text" class="text-light-muted dark:text-dark-muted font-medium text-lg transition-opacity duration-500 opacity-100 text-center flex items-center gap-2">
+                            <i class="fa-solid fa-circle-notch fa-spin text-blue-500"></i>
+                            <span>啟動多執行緒，正在全網掃描 9 大 PTT 看板...</span>
+                        </p>
+                    </div>
                 </div>
 
                 <div id="ai-results" class="hidden flex-col gap-6">
@@ -137,10 +145,9 @@
                 </div>
             </div>
 
-            <!-- 🎉 補回的：今日首頁熱文 -->
+            <!-- 今日首頁熱文 -->
             <div class="bg-light-card dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-light-border dark:border-dark-border flex-grow">
                 <h3 class="font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-fire text-red-500"></i> 今日首頁熱文</h3>
-                <!-- 🌟 加上 max-h-[400px] 與 overflow-y-auto 讓長列表可以優雅滾動 -->
                 <div id="hot-articles-container" class="flex flex-col gap-3 max-h-[400px] overflow-y-auto pr-2">
                     <div class="animate-pulse text-sm text-gray-400 text-center py-4">載入文章列表中...</div>
                 </div>
@@ -151,9 +158,9 @@
     <script>
         let currentUser = localStorage.getItem('pttUser') || 'Guest';
         let trendChart = null;
+        let loadingTimers = [];
 
         // ====== 🌟 核心徽章轉換邏輯 (Tier Mapping) ======
-        // 這裡負責把後端 0-100 的數字轉成梗圖徽章，給前端顯示
         function getTierBadge(temp) {
             temp = Math.max(0, Math.min(100, temp));
             if (temp >= 80) return { label: '夯 🔥', classes: 'bg-red-600 text-white border-red-800' };
@@ -172,7 +179,7 @@
         window.onload = () => {
             document.getElementById('current-user').innerText = currentUser;
             initChart();
-            loadHotTopics(); // 這裡會同時載入文字雲跟熱門文章！
+            loadHotTopics(); 
             loadRecommendations();
             
             if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -238,7 +245,6 @@
                 const res = await fetch('/api/hot_topics');
                 const data = await res.json();
                 
-                // 1. 渲染文字雲
                 if(data.keywords) {
                     const container = document.getElementById('wordcloud-container');
                     container.innerHTML = '';
@@ -261,10 +267,8 @@
                     });
                 }
 
-                // 2. 🎉 渲染今日首頁熱文 (補回的功能)
                 const articlesContainer = document.getElementById('hot-articles-container');
                 if (data.articles && data.articles.length > 0) {
-                    // 🌟 修改：將 slice(0, 6) 改為 slice(0, 15)，顯示 15 篇熱門文章
                     articlesContainer.innerHTML = data.articles.slice(0, 15).map(article => `
                         <a href="${article.url}" target="_blank" class="flex flex-col gap-1.5 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-transparent hover:border-gray-200 dark:hover:border-slate-600 transition group shadow-sm">
                             <div class="flex justify-between items-center">
@@ -328,15 +332,77 @@
             }
         }
 
-        async function performSearch() {
-            const keyword = document.getElementById('search-input').value.trim();
-            if (!keyword) return;
-
+        // ====== 🌟 動態 Loading 視覺掩飾邏輯 ======
+        function startDynamicLoading() {
+            const progressBar = document.getElementById('fake-progress-bar');
+            const statusText = document.getElementById('loading-status-text');
+            
             document.getElementById('ai-empty').classList.add('hidden');
             document.getElementById('ai-results').classList.add('hidden');
             document.getElementById('ai-loading').classList.remove('hidden');
             document.getElementById('ai-loading').classList.add('flex');
             
+            // 清除之前的計時器
+            loadingTimers.forEach(t => clearTimeout(t));
+            loadingTimers.forEach(t => clearInterval(t));
+            loadingTimers = [];
+
+            // 1. 初始化
+            progressBar.style.width = '0%';
+            statusText.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-blue-500"></i><span>啟動多執行緒，正在全網掃描 9 大 PTT 看板...</span>';
+            statusText.style.opacity = 1;
+
+            // 2. 階段性文字切換
+            const messages = [
+                { time: 8000, text: '<i class="fa-solid fa-cloud-arrow-down fa-bounce text-indigo-500"></i><span>精準鎖定 Top 5 相關文章，正在擷取鄉民推文...</span>' },
+                { time: 18000, text: '<i class="fa-solid fa-microchip fa-pulse text-purple-500"></i><span>資料已送達 AI 戰情室，Gemini 正在進行語意映射與階級計算...</span>' },
+                { time: 32000, text: '<i class="fa-solid fa-code text-pink-500"></i><span>正在組裝 JSON 數據模型，即將為您呈現結果...</span>' }
+            ];
+
+            messages.forEach(msg => {
+                const timer = setTimeout(() => {
+                    statusText.style.opacity = 0;
+                    setTimeout(() => {
+                        statusText.innerHTML = msg.text;
+                        statusText.style.opacity = 1;
+                    }, 500); // 配合 CSS transition
+                }, msg.time);
+                loadingTimers.push(timer);
+            });
+
+            // 3. 擬真進度條 (模擬 45 秒逐漸逼近 95%)
+            let progress = 0;
+            const progressTimer = setInterval(() => {
+                if (progress < 95) {
+                    // 越接近 95 走得越慢 (漸近式)
+                    progress += (95 - progress) * 0.05;
+                    progressBar.style.width = `${progress}%`;
+                }
+            }, 1000);
+            loadingTimers.push(progressTimer);
+        }
+
+        function stopDynamicLoading() {
+            // 清除計時器
+            loadingTimers.forEach(t => clearTimeout(t));
+            loadingTimers.forEach(t => clearInterval(t));
+            loadingTimers = [];
+            
+            // 將進度條瞬間拉滿
+            document.getElementById('fake-progress-bar').style.width = '100%';
+            
+            setTimeout(() => {
+                document.getElementById('ai-loading').classList.add('hidden');
+                document.getElementById('ai-loading').classList.remove('flex');
+            }, 500); // 給進度條一點時間跑滿再隱藏
+        }
+
+        async function performSearch() {
+            const keyword = document.getElementById('search-input').value.trim();
+            if (!keyword) return;
+
+            // 啟動炫酷載入畫面
+            startDynamicLoading();
             fetchTrend(keyword);
 
             try {
@@ -348,98 +414,88 @@
                 
                 const data = await res.json();
                 
-                document.getElementById('ai-loading').classList.add('hidden');
-                document.getElementById('ai-loading').classList.remove('flex');
+                // 停止載入動畫
+                stopDynamicLoading();
                 
-                if (!res.ok) {
-                    document.getElementById('ai-empty').classList.remove('hidden');
-                    document.getElementById('ai-empty').innerHTML = `<i class="fa-solid fa-triangle-exclamation text-5xl mb-4 text-red-500"></i><p class="text-red-500 font-bold">${data.error || '分析發生錯誤'}</p>`;
-                    return;
-                }
+                setTimeout(() => {
+                    if (!res.ok) {
+                        document.getElementById('ai-empty').classList.remove('hidden');
+                        document.getElementById('ai-empty').innerHTML = `<i class="fa-solid fa-triangle-exclamation text-5xl mb-4 text-red-500"></i><p class="text-red-500 font-bold">${data.error || '分析發生錯誤'}</p>`;
+                        return;
+                    }
 
-                if (data.message) {
-                    document.getElementById('ai-empty').classList.remove('hidden');
-                    document.getElementById('ai-empty').innerHTML = `<i class="fa-solid fa-ghost text-5xl mb-4 opacity-50"></i><p>${data.message}</p>`;
-                    return;
-                }
+                    if (data.message) {
+                        document.getElementById('ai-empty').classList.remove('hidden');
+                        document.getElementById('ai-empty').innerHTML = `<i class="fa-solid fa-ghost text-5xl mb-4 opacity-50"></i><p>${data.message}</p>`;
+                        return;
+                    }
 
-                document.getElementById('ai-results').classList.remove('hidden');
-                document.getElementById('ai-results').classList.add('flex');
-                
-                const macroScore = data.macro_score || 50;
-                const macroBadge = getTierBadge(macroScore);
-                // 這裡也套用了 PTT 徽章
-                document.getElementById('macro-score').innerHTML = `${macroScore}°C <span class="text-sm px-3 py-1 rounded-full ${macroBadge.classes} border ml-2">${macroBadge.label}</span>`;
-                document.getElementById('macro-summary').innerText = data.macro_summary || "目前無明顯共識";
-
-                const container = document.getElementById('articles-container');
-                container.innerHTML = data.matches.map(article => {
-                    // 發文者與留言區獨立算階級徽章
-                    const authorBadge = getTierBadge(article.author_temp);
-                    const commentBadge = getTierBadge(article.comment_temp);
+                    document.getElementById('ai-results').classList.remove('hidden');
+                    document.getElementById('ai-results').classList.add('flex');
                     
-                    return `
-                    <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-gray-100 dark:border-slate-700 shadow-sm transition hover:shadow-md">
-                        <div class="flex justify-between items-start mb-3">
-                            <a href="${article.url}" target="_blank" class="font-bold text-lg text-blue-700 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 transition line-clamp-2 pr-4">
-                                [${article.board}] ${article.title}
-                            </a>
-                            ${article.is_sarcasm ? `<span class="bg-red-100 text-red-700 border border-red-200 text-xs px-2 py-1 rounded font-bold whitespace-nowrap flex items-center gap-1 shadow-sm"><i class="fa-solid fa-triangle-exclamation"></i> 疑似反串</span>` : ''}
-                        </div>
-                        
-                        <div class="mb-4 text-gray-700 dark:text-gray-300 text-sm bg-gray-50 dark:bg-slate-900/50 p-4 rounded-lg border border-gray-100 dark:border-slate-700">
-                            <span class="font-bold text-indigo-500"><i class="fa-solid fa-robot"></i> AI 立場解析：</span> ${article.reason}
-                        </div>
+                    const macroScore = data.macro_score || 50;
+                    const macroBadge = getTierBadge(macroScore);
+                    document.getElementById('macro-score').innerHTML = `${macroScore}°C <span class="text-sm px-3 py-1 rounded-full ${macroBadge.classes} border ml-2">${macroBadge.label}</span>`;
+                    document.getElementById('macro-summary').innerText = data.macro_summary || "目前無明顯共識";
 
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900 rounded-lg p-4 border border-gray-100 dark:border-slate-800">
-                            <!-- 發文者區塊 -->
-                            <div>
-                                <div class="flex justify-between items-center text-xs font-bold mb-2 text-gray-600 dark:text-gray-400">
-                                    <span>✍️ 發文者風向</span>
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-sm">${article.author_temp}°C</span>
-                                        <span class="px-2 py-0.5 rounded text-[10px] border shadow-sm ${authorBadge.classes}">${authorBadge.label}</span>
-                                    </div>
-                                </div>
-                                <div class="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2.5">
-                                    <div class="${getTempColor(article.author_temp)} h-2.5 rounded-full progress-bar-fill" style="width: ${article.author_temp}%"></div>
-                                </div>
+                    const container = document.getElementById('articles-container');
+                    container.innerHTML = data.matches.map(article => {
+                        const authorBadge = getTierBadge(article.author_temp);
+                        const commentBadge = getTierBadge(article.comment_temp);
+                        
+                        return `
+                        <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-gray-100 dark:border-slate-700 shadow-sm transition hover:shadow-md">
+                            <div class="flex justify-between items-start mb-3">
+                                <a href="${article.url}" target="_blank" class="font-bold text-lg text-blue-700 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 transition line-clamp-2 pr-4">
+                                    [${article.board}] ${article.title}
+                                </a>
+                                ${article.is_sarcasm ? `<span class="bg-red-100 text-red-700 border border-red-200 text-xs px-2 py-1 rounded font-bold whitespace-nowrap flex items-center gap-1 shadow-sm"><i class="fa-solid fa-triangle-exclamation"></i> 疑似反串</span>` : ''}
                             </div>
                             
-                            <!-- 留言區區塊 -->
-                            <div>
-                                <div class="flex justify-between items-center text-xs font-bold mb-2 text-gray-600 dark:text-gray-400">
-                                    <span>💬 鄉民留言風向</span>
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-sm">${article.comment_temp}°C</span>
-                                        <span class="px-2 py-0.5 rounded text-[10px] border shadow-sm ${commentBadge.classes}">${commentBadge.label}</span>
+                            <div class="mb-4 text-gray-700 dark:text-gray-300 text-sm bg-gray-50 dark:bg-slate-900/50 p-4 rounded-lg border border-gray-100 dark:border-slate-700">
+                                <span class="font-bold text-indigo-500"><i class="fa-solid fa-robot"></i> AI 立場解析：</span> ${article.reason}
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900 rounded-lg p-4 border border-gray-100 dark:border-slate-800">
+                                <div>
+                                    <div class="flex justify-between items-center text-xs font-bold mb-2 text-gray-600 dark:text-gray-400">
+                                        <span>✍️ 發文者風向</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-sm">${article.author_temp}°C</span>
+                                            <span class="px-2 py-0.5 rounded text-[10px] border shadow-sm ${authorBadge.classes}">${authorBadge.label}</span>
+                                        </div>
+                                    </div>
+                                    <div class="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2.5">
+                                        <div class="${getTempColor(article.author_temp)} h-2.5 rounded-full progress-bar-fill" style="width: ${article.author_temp}%"></div>
                                     </div>
                                 </div>
-                                <div class="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2.5">
-                                    <div class="${getTempColor(article.comment_temp)} h-2.5 rounded-full progress-bar-fill" style="width: ${article.comment_temp}%"></div>
+                                
+                                <div>
+                                    <div class="flex justify-between items-center text-xs font-bold mb-2 text-gray-600 dark:text-gray-400">
+                                        <span>💬 鄉民留言風向</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-sm">${article.comment_temp}°C</span>
+                                            <span class="px-2 py-0.5 rounded text-[10px] border shadow-sm ${commentBadge.classes}">${commentBadge.label}</span>
+                                        </div>
+                                    </div>
+                                    <div class="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2.5">
+                                        <div class="${getTempColor(article.comment_temp)} h-2.5 rounded-full progress-bar-fill" style="width: ${article.comment_temp}%"></div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                `}).join('');
-                
-                loadRecommendations();
+                    `}).join('');
+                    
+                    loadRecommendations();
+                }, 600); // 確保進度條動畫跑完再渲染結果
 
             } catch (e) {
                 console.error(e);
-                document.getElementById('ai-loading').classList.add('hidden');
-                document.getElementById('ai-empty').classList.remove('hidden');
-                document.getElementById('ai-empty').innerHTML = `<p class="text-red-500">連線失敗，請檢查網路狀態。</p>`;
-            }
-        }
-
-        async function fetchTrend(keyword) {
-            try {
-                const res = await fetch(`/api/trend?keyword=${encodeURIComponent(keyword)}`);
-                const data = await res.json();
-                renderChart(data.dates, data.volumes);
-            } catch (e) {
-                console.error("趨勢圖載入失敗");
+                stopDynamicLoading();
+                setTimeout(() => {
+                    document.getElementById('ai-empty').classList.remove('hidden');
+                    document.getElementById('ai-empty').innerHTML = `<p class="text-red-500">連線失敗，請檢查網路狀態。</p>`;
+                }, 500);
             }
         }
     </script>
